@@ -1,172 +1,187 @@
 # Rosica
 
-Rosica is a responsive web application for running casual competitions inside
-offices, clubs, friend groups, and communities. Group administrators can manage
-players, configure competitions, record results, calculate rankings, run
-tournaments, and download branded result images.
+<p align="center">
+  <img src="./public/rosica-mark.svg" width="72" height="72" alt="Rosica logo">
+</p>
 
-The interface is English-only in v1. Dates are displayed with the `en-GB`
-locale, calendar filters use `Europe/Rome`, and all stored timestamps are UTC.
+<p align="center">
+  A mobile-first application for running friendly competitions in offices,
+  clubs, communities, and groups of friends.
+</p>
 
-## Stack
+<p align="center">
+  <a href="https://github.com/faiyaz97/rosico/actions/workflows/ci.yml">
+    <img src="https://github.com/faiyaz97/rosico/actions/workflows/ci.yml/badge.svg" alt="CI status">
+  </a>
+  <img src="https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22 or newer">
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white" alt="Strict TypeScript">
+</p>
 
-- Next.js 16, React 19, and strict TypeScript
-- Tailwind CSS 4 and source-owned accessible UI components
-- PostgreSQL with Drizzle ORM and checked-in migrations
-- Supabase Auth, managed PostgreSQL, and private Storage
-- Resend for production email
-- Vitest and Playwright
-- Vercel deployment
+Rosica turns informal matches into organised competitions. Administrators
+create a group, add players and competitions, record results, and let Rosica
+calculate rankings, statistics, and tournament progress automatically. Public
+groups can be viewed without an account; private groups remain visible only to
+their administrators.
 
-The browser never receives database or Supabase privileged credentials.
-Application data is accessed through authenticated server code. Public-schema
-tables have RLS enabled and Data API privileges revoked as defence in depth.
+## Highlights
 
-## Prerequisites
+- Group-scoped administration with public and private visibility
+- Accountless player profiles with archive-safe history
+- Predefined and custom competitions
+- Numeric, ordered-value, and direct winner-selection scoring
+- Singles, doubles, and configurable equal team sizes
+- Per-format and combined rankings with calendar filters
+- Player statistics, recent form, and match history
+- Single-elimination brackets and round-robin leagues
+- Private image uploads for groups, players, competitions, and tournaments
+- Downloadable result and tournament graphics
+- Responsive navigation designed separately for mobile and desktop
 
-- Node.js 22 or newer
-- pnpm 11
-- Docker Desktop or another Docker-compatible runtime
+## How it works
 
-Docker is required by the local Supabase stack. A global Supabase CLI install is
-not required; the project pins it as a development dependency.
+1. A registered user creates a group and becomes its administrator.
+2. Administrators add players, invite other administrators, and configure
+   competitions.
+3. Results are recorded using the competition's team-size and scoring rules.
+4. Rosica validates the match, calculates its outcome, and updates individual
+   statistics and rankings.
+5. The same scoring engine is reused by elimination and league tournaments.
 
-## Local setup
+Players do not need user accounts. Tournament games contribute to normal
+rankings and statistics, while immutable competition-rule versions keep
+historical results reproducible after settings change.
+
+## Technology
+
+| Area        | Implementation                                             |
+| ----------- | ---------------------------------------------------------- |
+| Application | Next.js 16, React 19, App Router, Server Actions           |
+| Language    | Strict TypeScript                                          |
+| Database    | PostgreSQL, Drizzle ORM, checked-in migrations             |
+| Platform    | Supabase Auth, PostgreSQL, and private Storage             |
+| Interface   | Tailwind CSS 4 and source-owned accessible components      |
+| Images      | Sharp for uploads, Next.js `ImageResponse` for share cards |
+| Validation  | Zod                                                        |
+| Tests       | Vitest, Testing Library, Playwright, axe                   |
+
+Rosica is a single Next.js application rather than separate frontend and
+backend services. Reads and mutations run on the server, and all group-owned
+records are authorised against their owning group.
+
+## Run locally
+
+### Requirements
+
+- [Node.js](https://nodejs.org/) 22 or newer
+- [pnpm](https://pnpm.io/) 11
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or another
+  Docker-compatible runtime
+
+The repository pins the Supabase CLI as a development dependency, so a global
+Supabase installation is not required.
+
+### Setup
 
 ```bash
+git clone https://github.com/faiyaz97/rosico.git
+cd rosico
 pnpm install
 pnpm setup:local
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). `setup:local` starts
-Supabase, creates `.env.local` from the local credentials, applies every Drizzle
-migration, creates the private media bucket, and loads deterministic demo data.
+Open [http://localhost:3000](http://localhost:3000).
 
-Supabase Studio and Mailpit URLs are printed by `pnpm supabase:start`. Mailpit
-captures confirmation and password-reset messages locally. Group invitations
-are also logged with a usable local signup URL when `RESEND_API_KEY` is empty.
+`pnpm setup:local` performs the complete development setup:
 
-### Demo accounts
+- starts local Supabase services in Docker;
+- creates `.env.local` from the generated local credentials;
+- applies the Drizzle migrations;
+- creates the private media bucket;
+- loads deterministic sample data.
 
-All seeded accounts use the password `RosicaDemo!2026`.
+The local Supabase output includes links for Studio and Mailpit. Mailpit captures
+authentication messages without sending real email, and invitations print a
+local signup URL when no Resend API key is configured.
 
-- `alex@rosica.test`
-- `sam@rosica.test`
-- `jordan@rosica.test`
-
-The seed includes two groups, shared administrators, accountless players,
-table-football singles and doubles, chess, an ordered-value custom competition,
-recorded games, rankings, a single-elimination bracket, and a round-robin
-league. The seed command is idempotent and is intended only for local or
-throwaway development environments.
-
-`Google Milano` is seeded as a public, unlisted group and can be viewed without
-signing in at
-[http://localhost:3000/app/groups/10000000-0000-4000-8000-000000000001](http://localhost:3000/app/groups/10000000-0000-4000-8000-000000000001).
-`Navigli Club` remains private.
-
-## Commands
+To stop the local services:
 
 ```bash
-pnpm dev             # Start the Next.js development server
+pnpm supabase:stop
+```
+
+### Manual environment setup
+
+Most contributors should use `pnpm setup:local`. For manual configuration, copy
+`.env.example` to `.env.local` and provide:
+
+| Variable                               | Purpose                                     |
+| -------------------------------------- | ------------------------------------------- |
+| `NEXT_PUBLIC_APP_URL`                  | Application origin                          |
+| `NEXT_PUBLIC_SUPABASE_URL`             | Supabase project URL                        |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe Supabase publishable key       |
+| `SUPABASE_SECRET_KEY`                  | Server-only Auth and Storage administration |
+| `DATABASE_URL`                         | Pooled PostgreSQL connection                |
+| `DATABASE_DIRECT_URL`                  | Direct PostgreSQL migration connection      |
+| `RESEND_API_KEY`                       | Optional email delivery                     |
+| `EMAIL_FROM`                           | Verified sender when email is enabled       |
+| `APP_TIMEZONE`                         | Application calendar timezone               |
+
+Never expose the secret key or database connections through a
+`NEXT_PUBLIC_` variable.
+
+## Useful commands
+
+```bash
+pnpm dev             # Start the development server
 pnpm build           # Create a production build
 pnpm start           # Run the production build
 pnpm lint            # Run ESLint
-pnpm typecheck       # Run strict TypeScript checking
-pnpm format          # Format source files
-pnpm format:check    # Check formatting without rewriting
-pnpm test            # Run domain and unit tests
-pnpm test:e2e        # Run Playwright at phone and desktop sizes
+pnpm typecheck       # Run strict TypeScript checks
+pnpm format:check    # Verify formatting
+pnpm test            # Run unit and domain tests
+pnpm test:e2e        # Run browser tests at phone and desktop sizes
 pnpm db:generate     # Generate a migration from the Drizzle schema
 pnpm db:migrate      # Apply pending migrations
-pnpm db:seed         # Load deterministic development data
-pnpm db:reset        # Reset only a localhost database, then migrate and seed
-pnpm storage:setup    # Create/verify the private media bucket
-pnpm supabase:start  # Start local Auth, Postgres, Storage, Studio, and Mailpit
-pnpm supabase:stop   # Stop the local stack
+pnpm db:seed         # Reload deterministic development data
+pnpm db:reset        # Reset, migrate, and seed a localhost database
+pnpm storage:setup   # Create or verify the private media bucket
+pnpm supabase:start  # Start local Supabase services
+pnpm supabase:stop   # Stop local Supabase services
 ```
 
-`db:reset` refuses to run when the configured database host is not
-`127.0.0.1` or `localhost`.
+`db:reset` refuses to run against database hosts other than `localhost` or
+`127.0.0.1`.
 
-## Environment
+## Project structure
 
-Copy `.env.example` only when configuring the application manually:
+```text
+src/app/             Routes, pages, Server Actions, and Route Handlers
+src/components/      Shared interface and domain-facing components
+src/db/              Drizzle schema and database client
+src/lib/domain/      Pure scoring, ranking, period, and tournament logic
+src/lib/server/      Authorised group-scoped data operations
+drizzle/             Versioned PostgreSQL migrations
+scripts/             Local setup, migration, seed, and storage utilities
+supabase/            Local Supabase configuration
+e2e/                 Playwright browser tests
+```
 
-| Variable                               | Purpose                                               |
-| -------------------------------------- | ----------------------------------------------------- |
-| `NEXT_PUBLIC_APP_URL`                  | Canonical application origin                          |
-| `NEXT_PUBLIC_SUPABASE_URL`             | Supabase project URL                                  |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe publishable key                          |
-| `SUPABASE_SECRET_KEY`                  | Server-only Auth and Storage administration           |
-| `DATABASE_URL`                         | Pooled server connection                              |
-| `DATABASE_DIRECT_URL`                  | Direct migration connection                           |
-| `RESEND_API_KEY`                       | Optional locally; required for production invitations |
-| `EMAIL_FROM`                           | Verified production sender                            |
-| `APP_TIMEZONE`                         | Must be `Europe/Rome`                                 |
+## Data integrity and security
 
-Never expose `SUPABASE_SECRET_KEY` or either database connection as a
-`NEXT_PUBLIC_` variable.
+- Passwords, verification, recovery, and sessions are handled by Supabase Auth.
+- Important validation and every mutation run on the server.
+- Public-schema tables use RLS and deny direct browser Data API access.
+- Composite foreign keys prevent records from crossing group boundaries.
+- Competition scoring rules are versioned so old games never change meaning.
+- Game edits and deletions preserve audit snapshots.
+- Images are decoded, limited to 5 MB, stripped of metadata, resized, converted
+  to WebP, and stored privately.
+- Calendar periods use `Europe/Rome` boundaries and UTC storage.
 
-## Database and security model
+## Current scope
 
-- Supabase owns the `auth`, `storage`, and `realtime` schemas. Rosica migrations
-  do not alter their internal tables.
-- Application tables live in `public`, have RLS enabled, and grant no Data API
-  access to `anon` or `authenticated`.
-- Every group mutation requires a verified Supabase session and an active
-  `(group_id, user_id)` membership.
-- Groups are private by default. An administrator can make a group public,
-  which enables the canonical `/app/groups/[groupId]` pages in unlisted,
-  `noindex`, read-only mode. Private group reads still require membership.
-  Invitations, audit actors, settings, and mutations are never exposed to
-  public viewers.
-- Composite foreign keys prevent players, formats, competitions, games, and
-  tournament entries from crossing group boundaries.
-- Competition rule versions and ordered score values are immutable after
-  creation.
-- Game mutations write audit snapshots in the same transaction.
-- Images are decoded, bounded to 5 MB, resized, stripped of metadata, encoded
-  as WebP, and stored in a private bucket.
-
-## Ranking and tournament rules
-
-Rankings are calculated from non-deleted game history. They sort by win
-percentage, head-to-head performance inside the tied cohort, total wins, score
-difference, games played, and most recent win. Exact remaining ties share a
-position. Team results contribute individual statistics to every team member.
-
-Calendar filters use Rome-local year, quarter, month, and ISO Monday-to-Sunday
-week boundaries before conversion to UTC.
-
-Elimination tournaments support odd best-of values up to 99, byes, fixed
-teams, series legs that count as normal games, and automatic winner
-progression. Leagues use one round robin with configurable win/draw/loss
-points.
-
-## Production deployment
-
-1. Create a Supabase project in an appropriate EU region.
-2. Configure email/password Auth, require email confirmation, add
-   `https://rosica.it/auth/callback` to allowed redirects, and use Resend as
-   custom SMTP.
-3. Configure the Vercel environment variables from the table above.
-4. Run `pnpm db:migrate` and `pnpm storage:setup` from a protected CI
-   deployment job.
-5. Deploy the Next.js application to Vercel only after migrations succeed.
-6. Attach `rosica.it`, redirect `www.rosica.it` to the apex, and verify the
-   Resend sending subdomain.
-
-Production data is never seeded automatically. Database migrations should be
-forward-compatible and backed up before destructive changes. Vercel and
-Supabase logs provide the initial operational diagnostics; `/api/health` is the
-deployment health probe.
-
-## Deliberately deferred
-
-V1 does not include additional languages, viewer roles, player accounts,
-uneven teams, free-for-all formats, double elimination, home-and-away leagues,
-set-by-set scoring, provisional rankings, advanced analytics, realtime
-updates, a native application, offline mode, a searchable public group
-directory, public share links, or direct social-network integrations.
+Rosica currently has an English-only interface. The first release deliberately
+does not include player accounts, granular roles, uneven teams, free-for-all
+formats, double elimination, home-and-away leagues, realtime updates, offline
+mode, or direct social-network integrations.

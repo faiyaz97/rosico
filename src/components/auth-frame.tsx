@@ -19,7 +19,7 @@ export function AuthFrame({
             rights.
           </p>
         </div>
-        <small>rosica.it</small>
+        <small>friendly competition, organised</small>
       </aside>
       <section className="auth-main">
         <Logo />

@@ -11,7 +11,7 @@ const serverEnvSchema = publicEnvSchema.extend({
   DATABASE_URL: z.string().min(1),
   DATABASE_DIRECT_URL: z.string().min(1).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
-  EMAIL_FROM: z.string().default("Rosica <hello@rosica.it>"),
+  EMAIL_FROM: z.string().default("Rosica <hello@example.com>"),
   APP_TIMEZONE: z.literal("Europe/Rome").default("Europe/Rome")
 });
 

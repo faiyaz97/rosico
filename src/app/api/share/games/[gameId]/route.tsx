@@ -156,7 +156,7 @@ export async function GET(
         <div style={{ fontSize: 42, fontWeight: 800, color: "#0b6b57" }}>
           {winner}
         </div>
-        <div style={{ fontSize: 26, color: "#667069" }}>rosica.it</div>
+        <div style={{ fontSize: 26, color: "#667069" }}>Rosica</div>
       </div>
     </div>,
     {

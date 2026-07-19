@@ -141,7 +141,7 @@ export async function GET(
             ? `Single elimination · Best of ${row.tournament.bestOf}`
             : "Round-robin league"}
         </span>
-        <span>rosica.it</span>
+        <span>Rosica</span>
       </div>
     </div>,
     {

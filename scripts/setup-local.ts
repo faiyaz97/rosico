@@ -54,7 +54,7 @@ const envFile = [
   `DATABASE_URL=${databaseUrl}`,
   `DATABASE_DIRECT_URL=${databaseUrl}`,
   "RESEND_API_KEY=",
-  "EMAIL_FROM=Rosica <hello@rosica.it>",
+  "EMAIL_FROM=Rosica <hello@example.com>",
   "APP_TIMEZONE=Europe/Rome",
   ""
 ].join("\n");
