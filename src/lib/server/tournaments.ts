@@ -27,6 +27,7 @@ import {
 } from "@/lib/server/authorization";
 import { conflict, unavailable, validationError } from "@/lib/server/errors";
 import { tournamentInputSchema } from "@/lib/validation/entities";
+import type { TournamentListStatus } from "@/lib/tournament-status";
 
 export async function createTournamentDraft(input: unknown) {
   const data = tournamentInputSchema.parse(input);
@@ -244,7 +245,11 @@ export async function startTournament(groupId: string, tournamentId: string) {
   });
 }
 
-export async function listTournaments(groupId: string, competitionId?: string) {
+export async function listTournaments(
+  groupId: string,
+  competitionId?: string,
+  status?: TournamentListStatus
+) {
   const access = await requireGroupViewer(groupId);
   const db = getDb();
   return db
@@ -255,6 +260,12 @@ export async function listTournaments(groupId: string, competitionId?: string) {
         eq(tournaments.groupId, groupId),
         competitionId
           ? eq(tournaments.competitionId, competitionId)
+          : undefined,
+        status
+          ? eq(
+              tournaments.status,
+              status.toUpperCase() as "ACTIVE" | "DRAFT" | "COMPLETED"
+            )
           : undefined,
         access.canManage
           ? undefined

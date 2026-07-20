@@ -9,7 +9,7 @@ import {
   addCatalogueCompetition,
   createCustomCompetition
 } from "@/lib/server/competitions";
-import { recordGame } from "@/lib/server/games";
+import { recordGame, updateGame } from "@/lib/server/games";
 import {
   acceptInvitation,
   cancelInvitation,
@@ -331,6 +331,33 @@ export async function recordGameAction(
     });
     revalidatePath(`/app/groups/${game.groupId}`);
     return { success: "Result recorded.", id: game.id };
+  } catch (error) {
+    return { error: publicError(error) };
+  }
+}
+
+export async function updateGameAction(
+  _state: EntityActionState,
+  formData: FormData
+): Promise<EntityActionState> {
+  try {
+    const groupId = text(formData, "groupId");
+    const game = await updateGame({
+      groupId,
+      gameId: text(formData, "gameId"),
+      expectedUpdatedAt: text(formData, "expectedUpdatedAt"),
+      competitionId: text(formData, "competitionId"),
+      formatId: text(formData, "formatId"),
+      sideAPlayerIds: formData.getAll("sideAPlayerIds").map(String),
+      sideBPlayerIds: formData.getAll("sideBPlayerIds").map(String),
+      scoreA: text(formData, "scoreA") || undefined,
+      scoreB: text(formData, "scoreB") || undefined,
+      result: text(formData, "result") || undefined,
+      playedAt: applicationDateTime(text(formData, "playedAt")),
+      location: text(formData, "location")
+    });
+    revalidatePath(`/app/groups/${groupId}`);
+    return { success: "Result corrected.", id: game.id };
   } catch (error) {
     return { error: publicError(error) };
   }

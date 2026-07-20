@@ -148,6 +148,53 @@ export const gameInputSchema = z
     }
   });
 
+export const gameUpdateInputSchema = gameInputSchema.and(
+  z.object({
+    gameId: id,
+    expectedUpdatedAt: z.coerce.date()
+  })
+);
+
+const seriesLegInputSchema = z
+  .object({
+    scoreA: z.string().trim().min(1).max(40).optional(),
+    scoreB: z.string().trim().min(1).max(40).optional(),
+    result: z.enum(["A", "B", "DRAW"]).optional()
+  })
+  .superRefine((value, context) => {
+    const hasScores = value.scoreA !== undefined || value.scoreB !== undefined;
+    if (value.result && hasScores) {
+      context.addIssue({
+        code: "custom",
+        path: ["result"],
+        message:
+          "Submit either a result or scores for each series leg, not both."
+      });
+    }
+    if (
+      !value.result &&
+      (value.scoreA === undefined || value.scoreB === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["scoreA"],
+        message: "A score is required for each side of every series leg."
+      });
+    }
+  });
+
+export const tournamentSeriesInputSchema = z.object({
+  groupId: id,
+  competitionId: id,
+  formatId: id,
+  tournamentMatchId: id,
+  sideAPlayerIds: z.array(id).min(1).max(20),
+  sideBPlayerIds: z.array(id).min(1).max(20),
+  playedAt: z.coerce.date().optional(),
+  location: optionalText(160),
+  legs: z.array(seriesLegInputSchema).min(1).max(99)
+});
+
 export const tournamentInputSchema = z
   .object({
     groupId: id,

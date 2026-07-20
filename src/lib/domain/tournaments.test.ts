@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   advanceBracketWinner,
   applySeriesLeg,
+  applySeriesLegs,
   calculateLeagueStandings,
   generateRoundRobinFixtures,
   generateSingleEliminationBracket,
+  replaySeries,
   requiredWins,
+  seriesLegPlayedAt,
   tournamentCompletionDate
 } from "./tournaments";
 
@@ -74,6 +77,80 @@ describe("elimination tournaments", () => {
       winnerEntryId: "b",
       completed: true
     });
+  });
+
+  it("applies several legs atomically and rejects a leg after a clinch", () => {
+    expect(
+      applySeriesLegs(
+        { sideAWins: 0, sideBWins: 0, bestOf: 3, winnerEntryId: null },
+        ["A", "A"],
+        "a",
+        "b"
+      )
+    ).toMatchObject({ sideAWins: 2, sideBWins: 0, winnerEntryId: "a" });
+
+    expect(() =>
+      applySeriesLegs(
+        { sideAWins: 0, sideBWins: 0, bestOf: 3, winnerEntryId: null },
+        ["A", "A", "B"],
+        "a",
+        "b"
+      )
+    ).toThrow(/after a side has clinched/);
+  });
+
+  it("keeps a best-of series in progress when its submitted legs do not clinch", () => {
+    expect(
+      applySeriesLegs(
+        { sideAWins: 0, sideBWins: 0, bestOf: 3, winnerEntryId: null },
+        ["DRAW", "A"],
+        "a",
+        "b"
+      )
+    ).toEqual({
+      sideAWins: 1,
+      sideBWins: 0,
+      winnerEntryId: null,
+      completed: false
+    });
+  });
+
+  it("rebuilds corrected series and rejects games recorded after a clinch", () => {
+    expect(replaySeries(["A", "B", "A"], 3, "a", "b")).toEqual({
+      sideAWins: 2,
+      sideBWins: 1,
+      winnerEntryId: "a",
+      completed: true
+    });
+    expect(replaySeries([], 3, "a", "b")).toEqual({
+      sideAWins: 0,
+      sideBWins: 0,
+      winnerEntryId: null,
+      completed: false
+    });
+    expect(() => replaySeries(["A", "A", "B"], 3, "a", "b")).toThrow(
+      /after a side has clinched/
+    );
+  });
+
+  it("rebuilds a draw-extended best-of series beyond its nominal length", () => {
+    expect(replaySeries(["DRAW", "A", "B", "A"], 3, "a", "b")).toEqual({
+      sideAWins: 2,
+      sideBWins: 1,
+      winnerEntryId: "a",
+      completed: true
+    });
+  });
+
+  it("keeps batch legs in deterministic submission order", () => {
+    const base = new Date("2026-07-19T18:00:00.000Z");
+
+    expect(seriesLegPlayedAt(base, 0).toISOString()).toBe(
+      "2026-07-19T18:00:00.000Z"
+    );
+    expect(seriesLegPlayedAt(base, 2).toISOString()).toBe(
+      "2026-07-19T18:00:00.002Z"
+    );
   });
 
   it("advances a winner into the correct downstream side", () => {

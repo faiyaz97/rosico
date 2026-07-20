@@ -6,6 +6,7 @@ import { Check, Search } from "lucide-react";
 
 import {
   recordGameAction,
+  updateGameAction,
   type EntityActionState
 } from "@/app/actions/entities";
 import { DateTimeControl } from "@/components/date-time-control";
@@ -185,6 +186,15 @@ export function RecordResultForm({
   setups,
   initialCompetitionId,
   initialFormatId,
+  correctionGameId,
+  expectedUpdatedAt,
+  initialSideA,
+  initialSideB,
+  initialScoreA = "",
+  initialScoreB = "",
+  initialResult = "",
+  initialPlayedAt = "",
+  initialLocation = "",
   tournamentMatchId,
   fixedSideA,
   fixedSideB,
@@ -194,6 +204,15 @@ export function RecordResultForm({
   setups: Setup[];
   initialCompetitionId: string;
   initialFormatId?: string;
+  correctionGameId?: string;
+  expectedUpdatedAt?: string;
+  initialSideA?: PlayerOption[];
+  initialSideB?: PlayerOption[];
+  initialScoreA?: string;
+  initialScoreB?: string;
+  initialResult?: "" | "A" | "B" | "DRAW";
+  initialPlayedAt?: string;
+  initialLocation?: string;
   tournamentMatchId?: string;
   fixedSideA?: PlayerOption[];
   fixedSideB?: PlayerOption[];
@@ -201,7 +220,7 @@ export function RecordResultForm({
 }) {
   const router = useRouter();
   const [state, action, pending] = useActionState(
-    recordGameAction,
+    correctionGameId ? updateGameAction : recordGameAction,
     initialState
   );
   const [competitionId, setCompetitionId] = useState(initialCompetitionId);
@@ -215,19 +234,27 @@ export function RecordResultForm({
     activeSetup.formats[0];
   const teamSize = activeFormat?.playersPerSide ?? 1;
   const [sideA, setSideA] = useState<string[]>(
-    fixedSideA?.map((player) => player.id) ?? Array(teamSize).fill("")
+    fixedSideA?.map((player) => player.id) ??
+      initialSideA?.map((player) => player.id) ??
+      Array(teamSize).fill("")
   );
   const [sideB, setSideB] = useState<string[]>(
-    fixedSideB?.map((player) => player.id) ?? Array(teamSize).fill("")
+    fixedSideB?.map((player) => player.id) ??
+      initialSideB?.map((player) => player.id) ??
+      Array(teamSize).fill("")
   );
-  const [scoreA, setScoreA] = useState("");
-  const [scoreB, setScoreB] = useState("");
-  const [result, setResult] = useState<"" | "A" | "B" | "DRAW">("");
-  const [playedAt, setPlayedAt] = useState("");
-  const [location, setLocation] = useState("");
+  const [scoreA, setScoreA] = useState(initialScoreA);
+  const [scoreB, setScoreB] = useState(initialScoreB);
+  const [result, setResult] = useState<"" | "A" | "B" | "DRAW">(initialResult);
+  const [playedAt, setPlayedAt] = useState(initialPlayedAt);
+  const [location, setLocation] = useState(initialLocation);
 
   useEffect(() => {
     if (state.id) {
+      if (correctionGameId) {
+        router.push(`/app/groups/${groupId}/games/${correctionGameId}`);
+        return;
+      }
       router.push(
         resultSuccessHref({
           groupId,
@@ -237,7 +264,14 @@ export function RecordResultForm({
         })
       );
     }
-  }, [cancelHref, groupId, router, state.id, tournamentMatchId]);
+  }, [
+    cancelHref,
+    correctionGameId,
+    groupId,
+    router,
+    state.id,
+    tournamentMatchId
+  ]);
 
   const selectedIds = useMemo(
     () => new Set([...sideA, ...sideB].filter(Boolean)),
@@ -254,6 +288,16 @@ export function RecordResultForm({
   return (
     <form className="form-shell" action={action}>
       <input type="hidden" name="groupId" value={groupId} />
+      {correctionGameId && (
+        <>
+          <input type="hidden" name="gameId" value={correctionGameId} />
+          <input
+            type="hidden"
+            name="expectedUpdatedAt"
+            value={expectedUpdatedAt}
+          />
+        </>
+      )}
       {tournamentMatchId && (
         <input
           type="hidden"
@@ -279,7 +323,7 @@ export function RecordResultForm({
               name="competitionId"
               value={activeSetup.id}
               ariaLabel="Competition"
-              disabled={Boolean(tournamentMatchId)}
+              disabled={Boolean(tournamentMatchId || correctionGameId)}
               onValueChange={(value) => {
                 const next = setups.find((setup) => setup.id === value);
                 if (!next) return;
@@ -298,7 +342,7 @@ export function RecordResultForm({
               }))}
             />
           </label>
-          {tournamentMatchId && (
+          {(tournamentMatchId || correctionGameId) && (
             <input type="hidden" name="competitionId" value={activeSetup.id} />
           )}
           <label className="field">
@@ -307,7 +351,7 @@ export function RecordResultForm({
               name="formatId"
               value={activeFormat?.id ?? ""}
               ariaLabel="Game format"
-              disabled={Boolean(tournamentMatchId)}
+              disabled={Boolean(tournamentMatchId || correctionGameId)}
               onValueChange={(nextId) => {
                 const next = activeSetup.formats.find(
                   (format) => format.id === nextId
@@ -322,7 +366,7 @@ export function RecordResultForm({
               }))}
             />
           </label>
-          {tournamentMatchId && (
+          {(tournamentMatchId || correctionGameId) && (
             <input
               type="hidden"
               name="formatId"
@@ -516,7 +560,11 @@ export function RecordResultForm({
           type="submit"
           disabled={pending}
         >
-          {pending ? "Saving…" : "Save result"}
+          {pending
+            ? "Saving…"
+            : correctionGameId
+              ? "Save correction"
+              : "Save result"}
         </button>
       </div>
     </form>

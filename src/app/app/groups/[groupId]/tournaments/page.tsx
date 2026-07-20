@@ -2,15 +2,24 @@ import Link from "next/link";
 import { listCompetitions } from "@/lib/server/competitions";
 import { listTournaments } from "@/lib/server/tournaments";
 import { EmptyState, PageHeader, Segmented, Status } from "@/components/ui";
+import {
+  parseTournamentStatus,
+  tournamentStatusOptions
+} from "@/lib/tournament-status";
 
 export default async function GroupTournamentsPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ groupId: string }>;
+  searchParams: Promise<{ status?: string | string[] }>;
 }) {
   const { groupId } = await params;
+  const query = await searchParams;
+  const status = parseTournamentStatus(query.status);
+  const baseHref = `/app/groups/${groupId}/tournaments`;
   const [tournaments, competitions] = await Promise.all([
-    listTournaments(groupId),
+    listTournaments(groupId, undefined, status === "all" ? undefined : status),
     listCompetitions(groupId, true)
   ]);
   const names = new Map(
@@ -27,8 +36,8 @@ export default async function GroupTournamentsPage({
       <div className="filter-bar">
         <Segmented
           label="Status"
-          options={["All", "Active", "Draft", "Completed"]}
-          active="All"
+          options={tournamentStatusOptions(baseHref)}
+          active={status.charAt(0).toUpperCase() + status.slice(1)}
         />
         <span className="active-period">{tournaments.length} tournaments</span>
       </div>
@@ -70,8 +79,14 @@ export default async function GroupTournamentsPage({
         </div>
       ) : (
         <EmptyState
-          title="No tournaments yet"
-          description="Open a competition to create its first tournament."
+          title={
+            status === "all" ? "No tournaments yet" : `No ${status} tournaments`
+          }
+          description={
+            status === "all"
+              ? "Open a competition to create its first tournament."
+              : "Choose another status to see this group's tournaments."
+          }
         />
       )}
     </div>

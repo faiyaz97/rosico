@@ -153,6 +153,95 @@ export function applySeriesLeg(
   };
 }
 
+/**
+ * Applies elimination legs in order. Draws do not count towards the wins
+ * needed, so a valid series may contain more games than its nominal best-of
+ * length. A leg can never be included after either side has clinched.
+ */
+export function applySeriesLegs(
+  state: {
+    sideAWins: number;
+    sideBWins: number;
+    bestOf: number;
+    winnerEntryId: string | null;
+  },
+  outcomes: readonly ("A" | "B" | "DRAW")[],
+  sideAEntryId: string,
+  sideBEntryId: string
+) {
+  if (outcomes.length === 0) {
+    throw new RangeError("At least one series leg is required.");
+  }
+  let next = {
+    sideAWins: state.sideAWins,
+    sideBWins: state.sideBWins,
+    bestOf: state.bestOf,
+    winnerEntryId: state.winnerEntryId,
+    completed: state.winnerEntryId !== null
+  };
+  for (const outcome of outcomes) {
+    if (next.completed) {
+      throw new Error(
+        "A series leg cannot be recorded after a side has clinched."
+      );
+    }
+    const updated = applySeriesLeg(next, outcome, sideAEntryId, sideBEntryId);
+    next = { ...updated, bestOf: state.bestOf };
+  }
+  return {
+    sideAWins: next.sideAWins,
+    sideBWins: next.sideBWins,
+    winnerEntryId: next.winnerEntryId,
+    completed: next.completed
+  };
+}
+
+/**
+ * Rebuilds an elimination series from its persisted games. This is used when
+ * an administrator corrects or removes a leg, so the aggregate result is
+ * always derived from the remaining audit-backed games.
+ */
+export function replaySeries(
+  outcomes: readonly ("A" | "B" | "DRAW")[],
+  bestOf: number,
+  sideAEntryId: string,
+  sideBEntryId: string
+) {
+  requiredWins(bestOf);
+  if (outcomes.length === 0) {
+    return {
+      sideAWins: 0,
+      sideBWins: 0,
+      winnerEntryId: null,
+      completed: false
+    };
+  }
+  return applySeriesLegs(
+    {
+      sideAWins: 0,
+      sideBWins: 0,
+      bestOf,
+      winnerEntryId: null
+    },
+    outcomes,
+    sideAEntryId,
+    sideBEntryId
+  );
+}
+
+export function seriesLegPlayedAt(basePlayedAt: Date, legIndex: number) {
+  if (
+    Number.isNaN(basePlayedAt.getTime()) ||
+    !Number.isInteger(legIndex) ||
+    legIndex < 0
+  ) {
+    throw new RangeError(
+      "Series leg chronology requires a valid date and index."
+    );
+  }
+  return new Date(basePlayedAt.getTime() + legIndex);
+}
+
 export function advanceBracketWinner(
   matches: readonly BracketMatch[],
   matchId: string,

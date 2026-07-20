@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation";
-import { CalendarDays, Share2, Trophy } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, CalendarDays, Share2, Trophy } from "lucide-react";
 import { getTournament, startTournament } from "@/lib/server/tournaments";
+import { listGames } from "@/lib/server/games";
 import { EliminationView, LeagueView } from "@/components/tournament-view";
 import {
   ButtonLink,
@@ -35,11 +37,32 @@ export default async function TournamentPage({
   }>;
 }) {
   const { groupId, competitionId, tournamentId } = await params;
-  const [data, access] = await Promise.all([
+  const [data, access, competitionGames] = await Promise.all([
     getTournamentOrNotFound(groupId, tournamentId, competitionId),
-    getGroupAccess(groupId)
+    getGroupAccess(groupId),
+    listGames(groupId, competitionId)
   ]);
   const { tournament, entries, matches, standings } = data;
+  const champion = entries.find(
+    (entry) => entry.id === tournament.winnerEntryId
+  );
+  const matchesWithLegs = matches.map((match) => ({
+    ...match,
+    legs: competitionGames
+      .filter((game) => game.tournamentMatchId === match.id)
+      .sort(
+        (left, right) =>
+          left.createdAt.getTime() - right.createdAt.getTime() ||
+          left.id.localeCompare(right.id)
+      )
+      .map((game) => ({
+        id: game.id,
+        scoreA: game.scoreA,
+        scoreB: game.scoreB,
+        outcome: game.outcome,
+        href: `/app/groups/${groupId}/games/${game.id}`
+      }))
+  }));
   const resultBase = `/app/groups/${groupId}/games/new?competition=${data.tournament.competitionId}&tournament=${tournamentId}`;
   async function start() {
     "use server";
@@ -50,6 +73,13 @@ export default async function TournamentPage({
   }
   return (
     <div className="app-content">
+      <Link
+        className="back-link tournament-back-link"
+        href={`/app/groups/${groupId}/competitions/${competitionId}/tournaments`}
+      >
+        <ArrowLeft size={17} aria-hidden="true" />
+        <span>Tournaments</span>
+      </Link>
       <div className="tournament-hero">
         <div>
           <Status
@@ -90,9 +120,28 @@ export default async function TournamentPage({
           </div>
         </div>
       </div>
+      {tournament.status === "COMPLETED" && champion && (
+        <section
+          className="tournament-champion"
+          aria-labelledby="champion-name"
+        >
+          <span className="tournament-champion-mark" aria-hidden="true">
+            <Trophy size={24} />
+          </span>
+          <div>
+            <p>Tournament champion</p>
+            <h2 id="champion-name">{champion.name}</h2>
+            {champion.members.length > 0 && (
+              <span>
+                {champion.members
+                  .map((member) => member.displayName)
+                  .join(" & ")}
+              </span>
+            )}
+          </div>
+        </section>
+      )}
       <PageHeader
-        backHref={`/app/groups/${groupId}/competitions/${competitionId}/tournaments`}
-        backLabel="Tournaments"
         title={tournament.type === "ELIMINATION" ? "Bracket" : "League table"}
         description={
           tournament.type === "ELIMINATION"
@@ -145,15 +194,16 @@ export default async function TournamentPage({
       ) : tournament.type === "ELIMINATION" ? (
         <EliminationView
           entries={entries}
-          matches={matches}
+          matches={matchesWithLegs}
           resultBase={resultBase}
+          bestOf={tournament.bestOf ?? 1}
           canManage={access.canManage}
         />
       ) : standings ? (
         <LeagueView
           entries={entries}
           standings={standings}
-          matches={matches}
+          matches={matchesWithLegs}
           resultBase={resultBase}
           canManage={access.canManage}
         />

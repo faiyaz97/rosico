@@ -12,6 +12,13 @@ type Match = {
   sideBWins: number;
   winnerEntryId: string | null;
   status: string;
+  legs?: Array<{
+    id: string;
+    scoreA: string;
+    scoreB: string;
+    outcome: "A" | "B" | "DRAW";
+    href?: string;
+  }>;
 };
 type Standing = {
   position: number;
@@ -28,11 +35,13 @@ export function EliminationView({
   entries,
   matches,
   resultBase,
+  bestOf,
   canManage = true
 }: {
   entries: Entry[];
   matches: Match[];
   resultBase: string;
+  bestOf: number;
   canManage?: boolean;
 }) {
   const entryName = (id: string | null) =>
@@ -40,52 +49,146 @@ export function EliminationView({
   const rounds = [...new Set(matches.map((match) => match.round))].sort(
     (a, b) => a - b
   );
+  const legValue = (
+    leg: NonNullable<Match["legs"]>[number] | undefined,
+    side: "A" | "B"
+  ) => {
+    if (!leg)
+      return (
+        <>
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">Not played</span>
+        </>
+      );
+    const value = side === "A" ? leg.scoreA : leg.scoreB;
+    return leg.href ? (
+      <Link
+        className="bracket-leg-link"
+        href={leg.href}
+        aria-label={`Open game result ${value}`}
+      >
+        {value}
+      </Link>
+    ) : (
+      value
+    );
+  };
   return (
-    <div className="bracket" aria-label="Single elimination bracket">
+    <div
+      className="bracket"
+      role="region"
+      aria-label="Single elimination bracket"
+      tabIndex={0}
+    >
       {rounds.map((round, index) => (
         <section className="bracket-round" key={round}>
           <h2>{index === rounds.length - 1 ? "Final" : `Round ${round}`}</h2>
           {matches
             .filter((match) => match.round === round)
-            .map((match) => (
-              <article className="bracket-match" key={match.id}>
-                <div
-                  className={`bracket-side ${match.winnerEntryId === match.sideAEntryId ? "winner" : ""}`}
-                >
-                  <span>{entryName(match.sideAEntryId)}</span>
-                  <strong>{match.sideAWins}</strong>
-                </div>
-                <div
-                  className={`bracket-side ${match.winnerEntryId === match.sideBEntryId ? "winner" : ""}`}
-                >
-                  <span>{entryName(match.sideBEntryId)}</span>
-                  <strong>{match.sideBWins}</strong>
-                </div>
-                <footer>
-                  {match.status === "READY" ||
-                  match.status === "IN_PROGRESS" ? (
-                    canManage ? (
-                      <Link
-                        className="text-link"
-                        href={`${resultBase}&match=${match.id}`}
-                      >
-                        Record next game
-                      </Link>
+            .map((match) => {
+              const legs = match.legs ?? [];
+              const legCount = Math.max(legs.length, bestOf);
+              return (
+                <article className="bracket-match" key={match.id}>
+                  <div className="bracket-score-wrap">
+                    <table className="bracket-score">
+                      <caption className="sr-only">
+                        {entryName(match.sideAEntryId)} versus{" "}
+                        {entryName(match.sideBEntryId)}
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">
+                            <span className="sr-only">Entry</span>
+                          </th>
+                          {Array.from({ length: legCount }, (_, legIndex) => (
+                            <th scope="col" key={legIndex}>
+                              G{legIndex + 1}
+                            </th>
+                          ))}
+                          <th className="bracket-wins-heading" scope="col">
+                            W<span className="sr-only">ins</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          className={
+                            match.winnerEntryId === match.sideAEntryId
+                              ? "winner"
+                              : undefined
+                          }
+                        >
+                          <th scope="row">{entryName(match.sideAEntryId)}</th>
+                          {Array.from({ length: legCount }, (_, legIndex) => (
+                            <td
+                              className={
+                                legs[legIndex]?.outcome === "A"
+                                  ? "leg-winner"
+                                  : undefined
+                              }
+                              key={legIndex}
+                            >
+                              {legValue(legs[legIndex], "A")}
+                            </td>
+                          ))}
+                          <td className="bracket-wins">
+                            <strong>{match.sideAWins}</strong>
+                          </td>
+                        </tr>
+                        <tr
+                          className={
+                            match.winnerEntryId === match.sideBEntryId
+                              ? "winner"
+                              : undefined
+                          }
+                        >
+                          <th scope="row">{entryName(match.sideBEntryId)}</th>
+                          {Array.from({ length: legCount }, (_, legIndex) => (
+                            <td
+                              className={
+                                legs[legIndex]?.outcome === "B"
+                                  ? "leg-winner"
+                                  : undefined
+                              }
+                              key={legIndex}
+                            >
+                              {legValue(legs[legIndex], "B")}
+                            </td>
+                          ))}
+                          <td className="bracket-wins">
+                            <strong>{match.sideBWins}</strong>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <footer>
+                    {match.status === "READY" ||
+                    match.status === "IN_PROGRESS" ? (
+                      canManage ? (
+                        <Link
+                          className="text-link"
+                          href={`${resultBase}&match=${match.id}`}
+                        >
+                          Record next game
+                        </Link>
+                      ) : (
+                        <Status>in progress</Status>
+                      )
                     ) : (
-                      <Status>in progress</Status>
-                    )
-                  ) : (
-                    <Status
-                      tone={
-                        match.status === "COMPLETED" ? "success" : "neutral"
-                      }
-                    >
-                      {match.status.toLowerCase()}
-                    </Status>
-                  )}
-                </footer>
-              </article>
-            ))}
+                      <Status
+                        tone={
+                          match.status === "COMPLETED" ? "success" : "neutral"
+                        }
+                      >
+                        {match.status.toLowerCase()}
+                      </Status>
+                    )}
+                  </footer>
+                </article>
+              );
+            })}
         </section>
       ))}
     </div>
@@ -166,6 +269,10 @@ export function LeagueView({
                 href={`${resultBase}&match=${match.id}`}
               >
                 Record result
+              </Link>
+            ) : match.status === "COMPLETED" && match.legs?.[0]?.href ? (
+              <Link className="text-link" href={match.legs[0].href}>
+                View result
               </Link>
             ) : (
               <Status

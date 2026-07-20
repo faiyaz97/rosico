@@ -66,7 +66,7 @@ export default async function GroupSettingsPage({
         console.warn("Could not remove replaced group image.", cleanupError);
       }
     }
-    revalidatePath(`/app/groups/${groupId}`);
+    revalidatePath(`/app/groups/${groupId}`, "layout");
   }
 
   async function invite(formData: FormData) {

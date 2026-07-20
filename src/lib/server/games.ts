@@ -30,8 +30,11 @@ import {
 } from "@/db";
 import {
   applySeriesLeg,
+  applySeriesLegs,
   calculateLeagueStandings,
   calculateOutcome,
+  replaySeries,
+  seriesLegPlayedAt,
   tournamentCompletionDate,
   validateGameTeams
 } from "@/lib/domain";
@@ -40,7 +43,11 @@ import {
   requireGroupViewer
 } from "@/lib/server/authorization";
 import { conflict, unavailable, validationError } from "@/lib/server/errors";
-import { gameInputSchema } from "@/lib/validation/entities";
+import {
+  gameInputSchema,
+  gameUpdateInputSchema,
+  tournamentSeriesInputSchema
+} from "@/lib/validation/entities";
 
 export async function getCompetitionGameSetup(
   groupId: string,
@@ -59,7 +66,9 @@ export async function getCompetitionGameSetup(
       and(
         eq(groupCompetitions.id, competitionId),
         eq(groupCompetitions.groupId, groupId),
-        isNull(groupCompetitions.archivedAt)
+        options.pinnedRuleVersionId
+          ? undefined
+          : isNull(groupCompetitions.archivedAt)
       )
     )
     .limit(1);
@@ -153,6 +162,11 @@ export async function recordGame(input: unknown) {
         sideBPlayerIds: data.sideBPlayerIds
       })
     : null;
+  if (preliminaryTournamentContext?.tournament.type === "ELIMINATION") {
+    throw conflict(
+      "Elimination matches must be recorded through the best-of series form."
+    );
+  }
 
   const [format] = await db
     .select()
@@ -554,6 +568,337 @@ export async function recordGame(input: unknown) {
   });
 }
 
+/**
+ * Records several legs of one active elimination match as one transaction.
+ * Each leg remains a normal game so rankings and player statistics include it.
+ */
+export async function recordTournamentSeries(input: unknown) {
+  const parsed = tournamentSeriesInputSchema.safeParse(input);
+  if (!parsed.success) throw parsed.error;
+  const data = parsed.data;
+  const actor = await requireGroupAdmin(data.groupId);
+  const db = getDb();
+
+  const preliminary = await validateTournamentTeams({
+    groupId: data.groupId,
+    competitionId: data.competitionId,
+    formatId: data.formatId,
+    tournamentMatchId: data.tournamentMatchId,
+    sideAPlayerIds: data.sideAPlayerIds,
+    sideBPlayerIds: data.sideBPlayerIds
+  });
+  if (preliminary.tournament.type !== "ELIMINATION") {
+    throw conflict("Only elimination matches can record a series.");
+  }
+
+  const [competition, format, rule] = await Promise.all([
+    db
+      .select()
+      .from(groupCompetitions)
+      .where(
+        and(
+          eq(groupCompetitions.id, data.competitionId),
+          eq(groupCompetitions.groupId, data.groupId),
+          isNull(groupCompetitions.archivedAt)
+        )
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select()
+      .from(competitionFormats)
+      .where(
+        and(
+          eq(competitionFormats.id, data.formatId),
+          eq(competitionFormats.competitionId, data.competitionId),
+          eq(competitionFormats.groupId, data.groupId)
+        )
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select()
+      .from(competitionRuleVersions)
+      .where(
+        and(
+          eq(competitionRuleVersions.id, preliminary.tournament.ruleVersionId),
+          eq(competitionRuleVersions.competitionId, data.competitionId),
+          eq(competitionRuleVersions.groupId, data.groupId)
+        )
+      )
+      .limit(1)
+      .then((rows) => rows[0])
+  ]);
+  if (!competition || !format || !rule) throw unavailable();
+
+  const selectedIds = [...data.sideAPlayerIds, ...data.sideBPlayerIds];
+  const [selectedPlayers, orderedValues] = await Promise.all([
+    db
+      .select()
+      .from(players)
+      .where(
+        and(eq(players.groupId, data.groupId), inArray(players.id, selectedIds))
+      ),
+    rule.scoreType === "ORDERED"
+      ? db
+          .select()
+          .from(orderedScoreValues)
+          .where(eq(orderedScoreValues.ruleVersionId, rule.id))
+          .orderBy(orderedScoreValues.ordinal)
+      : Promise.resolve([])
+  ]);
+  try {
+    validateGameTeams({
+      groupId: data.groupId,
+      playersPerSide: format.playersPerSide,
+      sideAPlayerIds: data.sideAPlayerIds,
+      sideBPlayerIds: data.sideBPlayerIds,
+      players: selectedPlayers
+    });
+  } catch (error) {
+    throw validationError(
+      error instanceof Error ? error.message : "The selected teams are invalid."
+    );
+  }
+
+  const outcomes = data.legs.map((leg) => {
+    if (rule.scoreType === "RESULT" && !leg.result) {
+      throw validationError("Select a result for every series leg.");
+    }
+    if (rule.scoreType !== "RESULT" && leg.result) {
+      throw validationError(
+        "This competition requires a score for each series leg."
+      );
+    }
+    try {
+      return calculateOutcome(
+        rule.scoreType === "ORDERED"
+          ? {
+              type: "ORDERED",
+              allowsDraws: rule.allowsDraws,
+              winnerDirection: rule.winnerDirection,
+              values: orderedValues.map((value) => value.value)
+            }
+          : rule.scoreType === "RESULT"
+            ? { type: "RESULT", allowsDraws: rule.allowsDraws }
+            : {
+                type: "NUMERIC",
+                allowsDraws: rule.allowsDraws,
+                winnerDirection: rule.winnerDirection
+              },
+        leg.scoreA,
+        leg.scoreB,
+        leg.result
+      );
+    } catch (error) {
+      throw validationError(
+        error instanceof Error ? error.message : "A series score is invalid."
+      );
+    }
+  });
+
+  const seriesPlayedAt = data.playedAt ?? new Date();
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select id from tournaments where id = ${preliminary.tournament.id} and group_id = ${data.groupId} for update`
+    );
+    await tx.execute(
+      sql`select id from tournament_matches where id = ${data.tournamentMatchId} and group_id = ${data.groupId} for update`
+    );
+    const [context] = await tx
+      .select({ match: tournamentMatches, tournament: tournaments })
+      .from(tournamentMatches)
+      .innerJoin(
+        tournaments,
+        and(
+          eq(tournaments.id, tournamentMatches.tournamentId),
+          eq(tournaments.groupId, tournamentMatches.groupId)
+        )
+      )
+      .where(
+        and(
+          eq(tournamentMatches.id, data.tournamentMatchId),
+          eq(tournamentMatches.groupId, data.groupId),
+          eq(tournaments.id, preliminary.tournament.id),
+          eq(tournaments.type, "ELIMINATION"),
+          eq(tournaments.status, "ACTIVE")
+        )
+      )
+      .limit(1);
+    if (
+      !context?.match.sideAEntryId ||
+      !context.match.sideBEntryId ||
+      !context.tournament.bestOf ||
+      !["READY", "IN_PROGRESS"].includes(context.match.status)
+    ) {
+      throw conflict("This tournament match is not accepting results.");
+    }
+
+    let series;
+    try {
+      series = applySeriesLegs(
+        {
+          sideAWins: context.match.sideAWins,
+          sideBWins: context.match.sideBWins,
+          bestOf: context.tournament.bestOf,
+          winnerEntryId: context.match.winnerEntryId
+        },
+        outcomes.map((outcome) => outcome.outcome),
+        context.match.sideAEntryId,
+        context.match.sideBEntryId
+      );
+    } catch (error) {
+      throw validationError(
+        error instanceof Error ? error.message : "The series legs are invalid."
+      );
+    }
+
+    const [latestSeriesGame] = await tx
+      .select({ createdAt: games.createdAt })
+      .from(games)
+      .where(
+        and(
+          eq(games.groupId, data.groupId),
+          eq(games.tournamentMatchId, data.tournamentMatchId)
+        )
+      )
+      .orderBy(desc(games.createdAt))
+      .limit(1);
+    const createdAtNow = new Date();
+    const seriesCreatedAt =
+      latestSeriesGame && latestSeriesGame.createdAt >= createdAtNow
+        ? new Date(latestSeriesGame.createdAt.getTime() + 1)
+        : createdAtNow;
+
+    const recordedGames = [];
+    for (const [legIndex, outcome] of outcomes.entries()) {
+      const legCreatedAt = seriesLegPlayedAt(seriesCreatedAt, legIndex);
+      const [game] = await tx
+        .insert(games)
+        .values({
+          groupId: data.groupId,
+          competitionId: data.competitionId,
+          formatId: data.formatId,
+          ruleVersionId: rule.id,
+          tournamentMatchId: data.tournamentMatchId,
+          scoreA: outcome.submittedScoreA,
+          scoreB: outcome.submittedScoreB,
+          comparableScoreA: String(outcome.comparableScoreA),
+          comparableScoreB: String(outcome.comparableScoreB),
+          outcome: outcome.outcome,
+          scoreDifference: String(outcome.scoreDifference),
+          playedAt: seriesLegPlayedAt(seriesPlayedAt, legIndex),
+          location: data.location,
+          createdById: actor.user.id,
+          updatedById: actor.user.id,
+          createdAt: legCreatedAt,
+          updatedAt: legCreatedAt
+        })
+        .returning();
+      if (!game) throw new Error("The result could not be saved.");
+      recordedGames.push(game);
+      await tx.insert(gameParticipants).values([
+        ...data.sideAPlayerIds.map((playerId, slot) => ({
+          gameId: game.id,
+          groupId: data.groupId,
+          playerId,
+          side: "A" as const,
+          slot
+        })),
+        ...data.sideBPlayerIds.map((playerId, slot) => ({
+          gameId: game.id,
+          groupId: data.groupId,
+          playerId,
+          side: "B" as const,
+          slot
+        }))
+      ]);
+      await tx.insert(gameRevisions).values({
+        gameId: game.id,
+        groupId: data.groupId,
+        actorId: actor.user.id,
+        action: "CREATE",
+        snapshot: {
+          ...game,
+          sideAPlayerIds: data.sideAPlayerIds,
+          sideBPlayerIds: data.sideBPlayerIds
+        }
+      });
+    }
+
+    await tx
+      .update(tournamentMatches)
+      .set({
+        sideAWins: series.sideAWins,
+        sideBWins: series.sideBWins,
+        winnerEntryId: series.winnerEntryId,
+        status: series.completed ? "COMPLETED" : "IN_PROGRESS",
+        updatedAt: new Date()
+      })
+      .where(
+        and(
+          eq(tournamentMatches.id, context.match.id),
+          eq(tournamentMatches.tournamentId, context.tournament.id),
+          eq(tournamentMatches.groupId, data.groupId)
+        )
+      );
+
+    if (
+      series.winnerEntryId &&
+      context.match.nextMatchId &&
+      context.match.nextMatchSide
+    ) {
+      await tx
+        .update(tournamentMatches)
+        .set({
+          ...(context.match.nextMatchSide === "A"
+            ? { sideAEntryId: series.winnerEntryId }
+            : { sideBEntryId: series.winnerEntryId }),
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(tournamentMatches.id, context.match.nextMatchId),
+            eq(tournamentMatches.tournamentId, context.tournament.id),
+            eq(tournamentMatches.groupId, data.groupId),
+            isNull(tournamentMatches.winnerEntryId)
+          )
+        );
+      await tx
+        .update(tournamentMatches)
+        .set({ status: "READY", updatedAt: new Date() })
+        .where(
+          and(
+            eq(tournamentMatches.id, context.match.nextMatchId),
+            eq(tournamentMatches.tournamentId, context.tournament.id),
+            eq(tournamentMatches.groupId, data.groupId),
+            sql`${tournamentMatches.sideAEntryId} is not null`,
+            sql`${tournamentMatches.sideBEntryId} is not null`
+          )
+        );
+    } else if (series.winnerEntryId && !context.match.nextMatchId) {
+      await tx
+        .update(tournaments)
+        .set({
+          status: "COMPLETED",
+          winnerEntryId: series.winnerEntryId,
+          endsAt: tournamentCompletionDate(context.tournament.startsAt),
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(tournaments.id, context.tournament.id),
+            eq(tournaments.groupId, data.groupId),
+            eq(tournaments.status, "ACTIVE")
+          )
+        );
+    }
+
+    return recordedGames;
+  });
+}
+
 async function validateTournamentTeams(input: {
   groupId: string;
   competitionId: string;
@@ -727,7 +1072,7 @@ export async function getGame(groupId: string, gameId: string) {
     )
     .limit(1);
   if (!game) throw unavailable();
-  const [participants, [rule]] = await Promise.all([
+  const [participants, [rule], tournamentContext] = await Promise.all([
     db
       .select({
         side: gameParticipants.side,
@@ -759,14 +1104,563 @@ export async function getGame(groupId: string, gameId: string) {
           eq(competitionRuleVersions.groupId, groupId)
         )
       )
-      .limit(1)
+      .limit(1),
+    game.tournamentMatchId
+      ? db
+          .select({
+            tournamentId: tournamentMatches.tournamentId,
+            competitionId: tournaments.competitionId,
+            type: tournaments.type,
+            bestOf: tournaments.bestOf
+          })
+          .from(tournamentMatches)
+          .innerJoin(
+            tournaments,
+            and(
+              eq(tournaments.id, tournamentMatches.tournamentId),
+              eq(tournaments.groupId, tournamentMatches.groupId)
+            )
+          )
+          .where(
+            and(
+              eq(tournamentMatches.id, game.tournamentMatchId),
+              eq(tournamentMatches.groupId, groupId)
+            )
+          )
+          .limit(1)
+          .then((rows) => rows[0] ?? null)
+      : Promise.resolve(null)
   ]);
   return {
     ...game,
     scoreType: rule?.scoreType ?? "NUMERIC",
+    tournament: tournamentContext,
     sideA: participants.filter((participant) => participant.side === "A"),
     sideB: participants.filter((participant) => participant.side === "B")
   };
+}
+
+export async function updateGame(input: unknown) {
+  const parsed = gameUpdateInputSchema.safeParse(input);
+  if (!parsed.success) throw parsed.error;
+  const data = parsed.data;
+  const actor = await requireGroupAdmin(data.groupId);
+  const db = getDb();
+
+  const [existing] = await db
+    .select()
+    .from(games)
+    .where(
+      and(
+        eq(games.id, data.gameId),
+        eq(games.groupId, data.groupId),
+        isNull(games.deletedAt)
+      )
+    )
+    .limit(1);
+  if (!existing) throw unavailable();
+  if (
+    existing.competitionId !== data.competitionId ||
+    existing.formatId !== data.formatId
+  ) {
+    throw validationError(
+      "A correction cannot move a result to another competition or format."
+    );
+  }
+
+  const [[format], [rule], currentParticipants] = await Promise.all([
+    db
+      .select()
+      .from(competitionFormats)
+      .where(
+        and(
+          eq(competitionFormats.id, existing.formatId),
+          eq(competitionFormats.competitionId, existing.competitionId),
+          eq(competitionFormats.groupId, data.groupId)
+        )
+      )
+      .limit(1),
+    db
+      .select()
+      .from(competitionRuleVersions)
+      .where(
+        and(
+          eq(competitionRuleVersions.id, existing.ruleVersionId),
+          eq(competitionRuleVersions.competitionId, existing.competitionId),
+          eq(competitionRuleVersions.groupId, data.groupId)
+        )
+      )
+      .limit(1),
+    db
+      .select()
+      .from(gameParticipants)
+      .where(
+        and(
+          eq(gameParticipants.gameId, data.gameId),
+          eq(gameParticipants.groupId, data.groupId)
+        )
+      )
+      .orderBy(gameParticipants.side, gameParticipants.slot)
+  ]);
+  if (!format || !rule) throw unavailable();
+
+  const selectedIds = [...data.sideAPlayerIds, ...data.sideBPlayerIds];
+  const selectedPlayers = await db
+    .select()
+    .from(players)
+    .where(
+      and(eq(players.groupId, data.groupId), inArray(players.id, selectedIds))
+    );
+  try {
+    validateGameTeams({
+      groupId: data.groupId,
+      playersPerSide: format.playersPerSide,
+      sideAPlayerIds: data.sideAPlayerIds,
+      sideBPlayerIds: data.sideBPlayerIds,
+      players: selectedPlayers.map((player) =>
+        currentParticipants.some(
+          (participant) => participant.playerId === player.id
+        )
+          ? { ...player, archivedAt: null }
+          : player
+      )
+    });
+  } catch (error) {
+    throw validationError(
+      error instanceof Error ? error.message : "The selected teams are invalid."
+    );
+  }
+
+  const orderedValues =
+    rule.scoreType === "ORDERED"
+      ? await db
+          .select()
+          .from(orderedScoreValues)
+          .where(eq(orderedScoreValues.ruleVersionId, rule.id))
+          .orderBy(orderedScoreValues.ordinal)
+      : [];
+  let outcome: ReturnType<typeof calculateOutcome>;
+  try {
+    outcome = calculateOutcome(
+      rule.scoreType === "ORDERED"
+        ? {
+            type: "ORDERED",
+            allowsDraws: rule.allowsDraws,
+            winnerDirection: rule.winnerDirection,
+            values: orderedValues.map((value) => value.value)
+          }
+        : rule.scoreType === "RESULT"
+          ? { type: "RESULT", allowsDraws: rule.allowsDraws }
+          : {
+              type: "NUMERIC",
+              allowsDraws: rule.allowsDraws,
+              winnerDirection: rule.winnerDirection
+            },
+      data.scoreA,
+      data.scoreB,
+      data.result
+    );
+  } catch (error) {
+    throw validationError(
+      error instanceof Error ? error.message : "The corrected score is invalid."
+    );
+  }
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select id from games where id = ${data.gameId} and group_id = ${data.groupId} for update`
+    );
+    const [lockedGame] = await tx
+      .select()
+      .from(games)
+      .where(
+        and(
+          eq(games.id, data.gameId),
+          eq(games.groupId, data.groupId),
+          isNull(games.deletedAt)
+        )
+      )
+      .limit(1);
+    if (!lockedGame) throw unavailable();
+    if (lockedGame.updatedAt.getTime() !== data.expectedUpdatedAt.getTime()) {
+      throw conflict(
+        "This result changed after you opened it. Reload the page before applying another correction."
+      );
+    }
+
+    let tournamentContext:
+      | {
+          match: typeof tournamentMatches.$inferSelect;
+          tournament: typeof tournaments.$inferSelect;
+        }
+      | undefined;
+    if (lockedGame.tournamentMatchId) {
+      const [context] = await tx
+        .select({ match: tournamentMatches, tournament: tournaments })
+        .from(tournamentMatches)
+        .innerJoin(
+          tournaments,
+          and(
+            eq(tournaments.id, tournamentMatches.tournamentId),
+            eq(tournaments.groupId, tournamentMatches.groupId)
+          )
+        )
+        .where(
+          and(
+            eq(tournamentMatches.id, lockedGame.tournamentMatchId),
+            eq(tournamentMatches.groupId, data.groupId)
+          )
+        )
+        .limit(1);
+      if (!context?.match.sideAEntryId || !context.match.sideBEntryId) {
+        throw unavailable();
+      }
+      await tx.execute(
+        sql`select id from tournaments where id = ${context.tournament.id} and group_id = ${data.groupId} for update`
+      );
+      await tx.execute(
+        sql`select id from tournament_matches where id = ${context.match.id} and group_id = ${data.groupId} for update`
+      );
+      tournamentContext = context;
+
+      const members = await tx
+        .select({
+          entryId: tournamentEntryPlayers.entryId,
+          playerId: tournamentEntryPlayers.playerId
+        })
+        .from(tournamentEntryPlayers)
+        .where(
+          and(
+            eq(tournamentEntryPlayers.groupId, data.groupId),
+            eq(tournamentEntryPlayers.tournamentId, context.tournament.id),
+            inArray(tournamentEntryPlayers.entryId, [
+              context.match.sideAEntryId,
+              context.match.sideBEntryId
+            ])
+          )
+        );
+      const expectedA = members
+        .filter((member) => member.entryId === context.match.sideAEntryId)
+        .map((member) => member.playerId)
+        .sort();
+      const expectedB = members
+        .filter((member) => member.entryId === context.match.sideBEntryId)
+        .map((member) => member.playerId)
+        .sort();
+      if (
+        expectedA.join(",") !== [...data.sideAPlayerIds].sort().join(",") ||
+        expectedB.join(",") !== [...data.sideBPlayerIds].sort().join(",")
+      ) {
+        throw validationError(
+          "Tournament participants are fixed; only the result details can be corrected."
+        );
+      }
+    }
+
+    const updatedAt = new Date();
+    const [updated] = await tx
+      .update(games)
+      .set({
+        scoreA: outcome.submittedScoreA,
+        scoreB: outcome.submittedScoreB,
+        comparableScoreA: String(outcome.comparableScoreA),
+        comparableScoreB: String(outcome.comparableScoreB),
+        outcome: outcome.outcome,
+        scoreDifference: String(outcome.scoreDifference),
+        playedAt: data.playedAt ?? lockedGame.playedAt,
+        location: data.location ?? null,
+        updatedAt,
+        updatedById: actor.user.id
+      })
+      .where(and(eq(games.id, data.gameId), eq(games.groupId, data.groupId)))
+      .returning();
+    if (!updated) throw unavailable();
+
+    if (!tournamentContext) {
+      await tx
+        .delete(gameParticipants)
+        .where(
+          and(
+            eq(gameParticipants.gameId, data.gameId),
+            eq(gameParticipants.groupId, data.groupId)
+          )
+        );
+      await tx.insert(gameParticipants).values([
+        ...data.sideAPlayerIds.map((playerId, slot) => ({
+          gameId: data.gameId,
+          groupId: data.groupId,
+          playerId,
+          side: "A" as const,
+          slot
+        })),
+        ...data.sideBPlayerIds.map((playerId, slot) => ({
+          gameId: data.gameId,
+          groupId: data.groupId,
+          playerId,
+          side: "B" as const,
+          slot
+        }))
+      ]);
+    }
+
+    await tx.insert(gameRevisions).values({
+      gameId: data.gameId,
+      groupId: data.groupId,
+      actorId: actor.user.id,
+      action: "UPDATE",
+      snapshot: {
+        before: lockedGame,
+        after: updated,
+        sideAPlayerIds: data.sideAPlayerIds,
+        sideBPlayerIds: data.sideBPlayerIds
+      }
+    });
+
+    if (tournamentContext) {
+      const { match, tournament } = tournamentContext;
+      if (tournament.type === "ELIMINATION") {
+        if (!tournament.bestOf || !match.sideAEntryId || !match.sideBEntryId) {
+          throw unavailable();
+        }
+        const legs = await tx
+          .select({ id: games.id, outcome: games.outcome })
+          .from(games)
+          .where(
+            and(
+              eq(games.groupId, data.groupId),
+              eq(games.tournamentMatchId, match.id),
+              isNull(games.deletedAt)
+            )
+          )
+          .orderBy(games.createdAt, games.id);
+        let series;
+        try {
+          series = replaySeries(
+            legs.map((leg) => leg.outcome),
+            tournament.bestOf,
+            match.sideAEntryId,
+            match.sideBEntryId
+          );
+        } catch {
+          throw conflict(
+            "This correction would end the series before a later recorded game. Remove the unnecessary later game first."
+          );
+        }
+        const winnerChanged = series.winnerEntryId !== match.winnerEntryId;
+        if (winnerChanged && match.nextMatchId) {
+          const [[downstream], [downstreamGames]] = await Promise.all([
+            tx
+              .select()
+              .from(tournamentMatches)
+              .where(
+                and(
+                  eq(tournamentMatches.id, match.nextMatchId),
+                  eq(tournamentMatches.groupId, data.groupId)
+                )
+              )
+              .limit(1),
+            tx
+              .select({ value: count() })
+              .from(games)
+              .where(
+                and(
+                  eq(games.groupId, data.groupId),
+                  eq(games.tournamentMatchId, match.nextMatchId),
+                  isNull(games.deletedAt)
+                )
+              )
+          ]);
+          if (
+            (downstreamGames?.value ?? 0) > 0 ||
+            Boolean(downstream?.winnerEntryId)
+          ) {
+            throw conflict(
+              "A later bracket match already has results. Remove those downstream results before changing this winner."
+            );
+          }
+          if (!match.nextMatchSide || !downstream) throw unavailable();
+          const nextSideA =
+            match.nextMatchSide === "A"
+              ? series.winnerEntryId
+              : downstream.sideAEntryId;
+          const nextSideB =
+            match.nextMatchSide === "B"
+              ? series.winnerEntryId
+              : downstream.sideBEntryId;
+          await tx
+            .update(tournamentMatches)
+            .set({
+              sideAEntryId: nextSideA,
+              sideBEntryId: nextSideB,
+              status: nextSideA && nextSideB ? "READY" : "PENDING",
+              updatedAt
+            })
+            .where(
+              and(
+                eq(tournamentMatches.id, downstream.id),
+                eq(tournamentMatches.groupId, data.groupId)
+              )
+            );
+        }
+        await tx
+          .update(tournamentMatches)
+          .set({
+            sideAWins: series.sideAWins,
+            sideBWins: series.sideBWins,
+            winnerEntryId: series.winnerEntryId,
+            status: series.completed
+              ? "COMPLETED"
+              : legs.length
+                ? "IN_PROGRESS"
+                : "READY",
+            updatedAt
+          })
+          .where(
+            and(
+              eq(tournamentMatches.id, match.id),
+              eq(tournamentMatches.groupId, data.groupId)
+            )
+          );
+        if (!match.nextMatchId) {
+          await tx
+            .update(tournaments)
+            .set({
+              status: series.completed ? "COMPLETED" : "ACTIVE",
+              winnerEntryId: series.winnerEntryId,
+              endsAt: series.completed
+                ? tournamentCompletionDate(tournament.startsAt)
+                : null,
+              updatedAt
+            })
+            .where(
+              and(
+                eq(tournaments.id, tournament.id),
+                eq(tournaments.groupId, data.groupId)
+              )
+            );
+        }
+      } else {
+        await tx
+          .update(tournamentMatches)
+          .set({
+            winnerEntryId:
+              outcome.outcome === "A"
+                ? match.sideAEntryId
+                : outcome.outcome === "B"
+                  ? match.sideBEntryId
+                  : null,
+            status: "COMPLETED",
+            updatedAt
+          })
+          .where(
+            and(
+              eq(tournamentMatches.id, match.id),
+              eq(tournamentMatches.groupId, data.groupId)
+            )
+          );
+        const [remaining] = await tx
+          .select({ value: count() })
+          .from(tournamentMatches)
+          .where(
+            and(
+              eq(tournamentMatches.tournamentId, tournament.id),
+              eq(tournamentMatches.groupId, data.groupId),
+              ne(tournamentMatches.status, "COMPLETED")
+            )
+          );
+        if ((remaining?.value ?? 0) === 0) {
+          const [entryRows, matchRows, gameRows] = await Promise.all([
+            tx
+              .select()
+              .from(tournamentEntries)
+              .where(
+                and(
+                  eq(tournamentEntries.tournamentId, tournament.id),
+                  eq(tournamentEntries.groupId, data.groupId)
+                )
+              ),
+            tx
+              .select()
+              .from(tournamentMatches)
+              .where(
+                and(
+                  eq(tournamentMatches.tournamentId, tournament.id),
+                  eq(tournamentMatches.groupId, data.groupId)
+                )
+              ),
+            tx
+              .select()
+              .from(games)
+              .where(
+                and(
+                  eq(games.groupId, data.groupId),
+                  inArray(
+                    games.tournamentMatchId,
+                    (
+                      await tx
+                        .select({ id: tournamentMatches.id })
+                        .from(tournamentMatches)
+                        .where(
+                          and(
+                            eq(tournamentMatches.tournamentId, tournament.id),
+                            eq(tournamentMatches.groupId, data.groupId)
+                          )
+                        )
+                    ).map((row) => row.id)
+                  ),
+                  isNull(games.deletedAt)
+                )
+              )
+          ]);
+          const matchById = new Map(
+            matchRows.map((candidate) => [candidate.id, candidate])
+          );
+          const standings = calculateLeagueStandings(
+            entryRows.map((entry) => ({ id: entry.id, seed: entry.seed })),
+            gameRows.flatMap((candidate) => {
+              const fixture = candidate.tournamentMatchId
+                ? matchById.get(candidate.tournamentMatchId)
+                : null;
+              if (!fixture?.sideAEntryId || !fixture.sideBEntryId) return [];
+              return [
+                {
+                  round: fixture.round,
+                  slot: fixture.slot,
+                  sideAEntryId: fixture.sideAEntryId,
+                  sideBEntryId: fixture.sideBEntryId,
+                  outcome: candidate.outcome,
+                  scoreA: Number(candidate.comparableScoreA),
+                  scoreB: Number(candidate.comparableScoreB),
+                  scoreDifferenceEligible: rule.scoreType !== "RESULT"
+                }
+              ];
+            }),
+            {
+              win: tournament.winPoints ?? 3,
+              draw: tournament.drawPoints ?? 1,
+              loss: tournament.lossPoints ?? 0
+            }
+          );
+          await tx
+            .update(tournaments)
+            .set({
+              status: "COMPLETED",
+              winnerEntryId: standings[0]?.entryId ?? null,
+              endsAt: tournamentCompletionDate(tournament.startsAt),
+              updatedAt
+            })
+            .where(
+              and(
+                eq(tournaments.id, tournament.id),
+                eq(tournaments.groupId, data.groupId)
+              )
+            );
+        }
+      }
+    }
+
+    return updated;
+  });
 }
 
 export async function removeGame(groupId: string, gameId: string) {

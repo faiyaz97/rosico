@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   RecordResultForm,
@@ -9,7 +9,8 @@ import {
 } from "@/components/record-result-form";
 
 vi.mock("@/app/actions/entities", () => ({
-  recordGameAction: vi.fn(async () => ({}))
+  recordGameAction: vi.fn(async () => ({})),
+  updateGameAction: vi.fn(async () => ({}))
 }));
 
 vi.mock("next/navigation", () => ({
@@ -24,6 +25,8 @@ const players = [
 ];
 
 describe("RecordResultForm", () => {
+  afterEach(cleanup);
+
   it("returns to a tournament after recording its match", () => {
     expect(
       resultSuccessHref({
@@ -130,5 +133,50 @@ describe("RecordResultForm", () => {
     expect(screen.queryByRole("radio", { name: "Draw" })).toBeNull();
     expect(container.querySelector('[name="scoreA"]')).toBeNull();
     expect(container.querySelector('[name="scoreB"]')).toBeNull();
+  });
+
+  it("prefills every editable value when correcting an existing result", () => {
+    render(
+      <RecordResultForm
+        groupId="10000000-0000-4000-8000-000000000001"
+        initialCompetitionId="10000000-0000-4000-8000-000000000021"
+        initialFormatId="10000000-0000-4000-8000-000000000031"
+        correctionGameId="10000000-0000-4000-8000-000000000041"
+        expectedUpdatedAt="2026-07-19T16:00:00.000Z"
+        initialSideA={[players[0]!]}
+        initialSideB={[players[1]!]}
+        initialResult="A"
+        initialPlayedAt="2026-07-19T18:30"
+        initialLocation="Club room"
+        setups={[
+          {
+            id: "10000000-0000-4000-8000-000000000021",
+            name: "Chess",
+            rule: { scoreType: "RESULT", allowsDraws: true },
+            formats: [
+              {
+                id: "10000000-0000-4000-8000-000000000031",
+                label: "1 vs 1",
+                playersPerSide: 1
+              }
+            ],
+            players,
+            scoreValues: []
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("radio", { name: "Side A wins" })).toBeChecked();
+    expect(screen.getByDisplayValue("Ada")).toBeVisible();
+    expect(screen.getByDisplayValue("Ben")).toBeVisible();
+    expect(screen.getByDisplayValue("2026-07-19T18:30")).toBeVisible();
+    expect(screen.getByDisplayValue("Club room")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Save correction" })
+    ).toBeVisible();
+    expect(
+      document.querySelector('input[name="expectedUpdatedAt"]')
+    ).toHaveValue("2026-07-19T16:00:00.000Z");
   });
 });

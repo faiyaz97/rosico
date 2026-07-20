@@ -105,7 +105,11 @@ export default async function CustomCompetitionPage({
         description="The same rules power result validation, rankings and tournaments."
       />
       <form className="form-shell" action={create}>
-        <div className="step-list" aria-label="Four configuration sections">
+        <div
+          className="step-list"
+          role="img"
+          aria-label="Four configuration sections"
+        >
           <span className="active" />
           <span className="active" />
           <span className="active" />

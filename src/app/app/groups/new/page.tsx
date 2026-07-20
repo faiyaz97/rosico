@@ -58,7 +58,7 @@ export default function CreateGroupPage() {
         description="You will become the first administrator. Add more administrators after creation."
       />
       <form className="form-shell" action={create}>
-        <div className="step-list" aria-label="Step 1 of 1">
+        <div className="step-list" role="img" aria-label="Step 1 of 1">
           <span className="active" />
         </div>
         <div className="form-section">

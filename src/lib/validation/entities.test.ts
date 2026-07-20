@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { customCompetitionInputSchema, gameInputSchema } from "./entities";
+import {
+  customCompetitionInputSchema,
+  gameInputSchema,
+  tournamentSeriesInputSchema
+} from "./entities";
 
 const game = {
   groupId: "11111111-1111-4111-8111-111111111111",
@@ -49,6 +53,33 @@ describe("customCompetitionInputSchema", () => {
           { label: "Singles", playersPerSide: 1 },
           { label: "Also singles", playersPerSide: 1 }
         ]
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("tournamentSeriesInputSchema", () => {
+  it("requires one complete score or result for every submitted leg", () => {
+    const series = {
+      ...game,
+      tournamentMatchId: "66666666-6666-4666-8666-666666666666"
+    };
+    expect(
+      tournamentSeriesInputSchema.safeParse({
+        ...series,
+        legs: [{ scoreA: "11", scoreB: "8" }, { result: "A" }]
+      }).success
+    ).toBe(true);
+    expect(
+      tournamentSeriesInputSchema.safeParse({
+        ...series,
+        legs: [{ scoreA: "11" }]
+      }).success
+    ).toBe(false);
+    expect(
+      tournamentSeriesInputSchema.safeParse({
+        ...series,
+        legs: [{ scoreA: "11", scoreB: "8", result: "A" }]
       }).success
     ).toBe(false);
   });

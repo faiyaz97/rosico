@@ -3,18 +3,10 @@ import { fromZonedTime } from "date-fns-tz";
 import { getCompetitionGameSetup } from "@/lib/server/games";
 import { createTournamentDraft } from "@/lib/server/tournaments";
 import { APPLICATION_TIME_ZONE } from "@/lib/domain";
-import {
-  EmptyState,
-  Field,
-  FormActions,
-  PageHeader,
-  SelectField
-} from "@/components/ui";
+import { EmptyState, FormActions, PageHeader } from "@/components/ui";
 import { requireGroupAdmin } from "@/lib/server/authorization";
-import {
-  selectInitialTournamentFormat,
-  TournamentFormatEntries
-} from "@/components/tournament-format-entries";
+import { TournamentFormatEntries } from "@/components/tournament-format-entries";
+import { selectInitialTournamentFormat } from "@/lib/tournament-formats";
 
 export default async function NewTournamentPage({
   params,
@@ -102,10 +94,14 @@ export default async function NewTournamentPage({
         backLabel="Tournaments"
         eyebrow={setup.competition.name}
         title="Create a tournament"
-        description="Set the structure, choose fixed entries, then review the generated fixtures before starting."
+        description="Set the structure, add participants, then review the generated fixtures before starting."
       />
       <form className="form-shell" action={create}>
-        <div className="step-list" aria-label="Four tournament sections">
+        <div
+          className="step-list"
+          role="img"
+          aria-label="Four tournament sections"
+        >
           <span className="active" />
           <span className="active" />
           <span className="active" />
@@ -115,48 +111,8 @@ export default async function NewTournamentPage({
           formats={setup.formats}
           players={setup.players}
           initialFormatId={format.id}
+          allowsDraws={setup.rule.allowsDraws}
         />
-        <div className="form-section">
-          <h2>Tournament rules</h2>
-          <p>Only the fields for the selected tournament type are used.</p>
-          <div className="field-row two">
-            <SelectField
-              label="Elimination series"
-              name="bestOf"
-              options={[
-                { label: "Best of 1", value: "1" },
-                { label: "Best of 3", value: "3" },
-                { label: "Best of 5", value: "5" },
-                { label: "Best of 7", value: "7" }
-              ]}
-            />
-            <Field
-              label="Win points"
-              name="winPoints"
-              type="number"
-              defaultValue="3"
-            />
-          </div>
-          <div className="field-row two">
-            <Field
-              label="Draw points"
-              name="drawPoints"
-              type="number"
-              defaultValue={setup.rule.allowsDraws ? "1" : "0"}
-              description={
-                setup.rule.allowsDraws
-                  ? undefined
-                  : "Draws are disabled for this competition."
-              }
-            />
-            <Field
-              label="Loss points"
-              name="lossPoints"
-              type="number"
-              defaultValue="0"
-            />
-          </div>
-        </div>
         <FormActions
           submit="Create draft"
           cancelHref={`/app/groups/${groupId}/competitions/${competitionId}/tournaments`}

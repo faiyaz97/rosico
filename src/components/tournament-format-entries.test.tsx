@@ -13,7 +13,7 @@ const players = Array.from({ length: 8 }, (_, index) => ({
 describe("TournamentFormatEntries", () => {
   afterEach(cleanup);
 
-  it("updates each entry's player slots when the format changes", () => {
+  it("adds and removes players from one searchable participant picker", () => {
     render(
       <TournamentFormatEntries
         formats={[
@@ -25,20 +25,52 @@ describe("TournamentFormatEntries", () => {
       />
     );
 
-    expect(screen.getAllByRole("group", { name: /Entry/ })).toHaveLength(8);
-    expect(screen.getAllByRole("combobox", { name: /Player/ })).toHaveLength(8);
+    const search = screen.getByRole("combobox", { name: "Add players" });
+    expect(screen.queryByText("Entry 1")).not.toBeInTheDocument();
+
+    fireEvent.focus(search);
+    fireEvent.click(screen.getByRole("option", { name: "Player 1" }));
+    expect(screen.getByText("Participant 1")).toBeInTheDocument();
+    expect(document.querySelector('input[name="entry-0"]')).toHaveValue(
+      "player-1"
+    );
+
+    fireEvent.click(search);
+    expect(screen.getByRole("option", { name: "Player 2" })).toBeVisible();
+    fireEvent.click(screen.getByRole("option", { name: "Player 2" }));
+    expect(screen.getByLabelText("2 selected")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Player 1" }));
+    expect(screen.getByLabelText("1 selected")).toBeVisible();
+    expect(document.querySelector('input[name="entry-0"]')).toHaveValue(
+      "player-2"
+    );
+  });
+
+  it("groups selected players by team when the format changes", () => {
+    render(
+      <TournamentFormatEntries
+        formats={[
+          { id: "one", label: "1 vs 1", playersPerSide: 1 },
+          { id: "two", label: "2 vs 2", playersPerSide: 2 }
+        ]}
+        players={players}
+        initialFormatId="one"
+      />
+    );
 
     fireEvent.click(screen.getByRole("combobox", { name: "Game format" }));
     fireEvent.click(screen.getByRole("option", { name: "2 vs 2" }));
 
-    expect(screen.getAllByRole("group", { name: /Entry/ })).toHaveLength(4);
-    expect(screen.getAllByRole("combobox", { name: /Player/ })).toHaveLength(8);
-    expect(
-      screen.getAllByRole("group", { name: /Entry/ })[0]
-    ).toHaveTextContent("Player 1");
-    expect(
-      screen.getAllByRole("group", { name: /Entry/ })[0]
-    ).toHaveTextContent("Player 2");
+    const search = screen.getByRole("combobox", { name: "Add players" });
+    for (const player of players.slice(0, 2)) {
+      fireEvent.focus(search);
+      fireEvent.click(screen.getByRole("option", { name: player.displayName }));
+    }
+
+    expect(screen.getByText("Team 1 · Player 1")).toBeInTheDocument();
+    expect(screen.getByText("Team 1 · Player 2")).toBeInTheDocument();
+    expect(document.querySelectorAll('input[name="entry-0"]')).toHaveLength(2);
   });
 
   it("starts with a viable format and disables formats without two entries", () => {
@@ -63,6 +95,34 @@ describe("TournamentFormatEntries", () => {
         name: "5 vs 5 — not enough active players"
       })
     ).toBeDisabled();
-    expect(screen.getAllByRole("group", { name: /Entry/ })).toHaveLength(4);
+    expect(
+      screen.getByRole("combobox", { name: "Add players" })
+    ).toBeInTheDocument();
+  });
+
+  it("shows only the rules that apply to the selected tournament type", () => {
+    render(
+      <TournamentFormatEntries
+        formats={[{ id: "one", label: "1 vs 1", playersPerSide: 1 }]}
+        players={players}
+        initialFormatId="one"
+        allowsDraws
+      />
+    );
+
+    expect(
+      screen.getByRole("combobox", { name: "Games per match" })
+    ).toBeVisible();
+    expect(screen.queryByLabelText("Win points")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Type" }));
+    fireEvent.click(screen.getByRole("option", { name: "Round-robin league" }));
+
+    expect(
+      screen.queryByRole("combobox", { name: "Games per match" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Win points")).toBeVisible();
+    expect(screen.getByLabelText("Draw points")).toBeVisible();
+    expect(screen.getByLabelText("Loss points")).toBeVisible();
   });
 });

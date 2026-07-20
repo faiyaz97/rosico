@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { RecordResultForm } from "@/components/record-result-form";
+import { TournamentSeriesResultForm } from "@/components/tournament-series-result-form";
 import { EmptyState, PageHeader } from "@/components/ui";
 import { listCompetitions } from "@/lib/server/competitions";
 import { getCompetitionGameSetup } from "@/lib/server/games";
@@ -66,7 +67,8 @@ export default async function RecordResultPage({
         name: competition.name,
         rule: {
           scoreType: setup.rule.scoreType,
-          allowsDraws: setup.rule.allowsDraws
+          allowsDraws: setup.rule.allowsDraws,
+          winnerDirection: setup.rule.winnerDirection
         },
         formats: setup.formats.map((format) => ({
           id: format.id,
@@ -102,6 +104,20 @@ export default async function RecordResultPage({
   const backHref = tournament
     ? `/app/groups/${groupId}/competitions/${tournament.tournament.competitionId}/tournaments/${tournament.tournament.id}`
     : `/app/groups/${groupId}/games`;
+  const tournamentSetup = tournament
+    ? setups.find((setup) => setup.id === tournament.tournament.competitionId)
+    : undefined;
+  const tournamentFormat = tournamentSetup?.formats.find(
+    (format) => format.id === tournament?.tournament.formatId
+  );
+  const isEliminationSeries =
+    tournament?.tournament.type === "ELIMINATION" &&
+    tournamentMatch &&
+    tournament.tournament.bestOf &&
+    sideAEntry &&
+    sideBEntry &&
+    tournamentSetup &&
+    tournamentFormat;
 
   return (
     <div className="app-content">
@@ -109,27 +125,58 @@ export default async function RecordResultPage({
         backHref={backHref}
         backLabel={tournament ? tournament.tournament.name : "Match history"}
         eyebrow="New result"
-        title="Record a result"
-        description="Choose the players and final result. Rosica validates it and updates the ranking."
-      />
-      <RecordResultForm
-        groupId={groupId}
-        setups={setups}
-        initialCompetitionId={
-          tournament?.tournament.competitionId ?? initialCompetitionId
+        title={
+          isEliminationSeries ? "Record series results" : "Record a result"
         }
-        initialFormatId={tournament?.tournament.formatId}
-        tournamentMatchId={tournamentMatch?.id}
-        fixedSideA={sideAEntry?.members.map((player) => ({
-          id: player.playerId,
-          displayName: player.displayName
-        }))}
-        fixedSideB={sideBEntry?.members.map((player) => ({
-          id: player.playerId,
-          displayName: player.displayName
-        }))}
-        cancelHref={backHref}
+        description={
+          isEliminationSeries
+            ? "Add one or more games from this series. Rosica stops the series as soon as a side reaches the required wins."
+            : "Choose the players and final result. Rosica validates it and updates the ranking."
+        }
       />
+      {isEliminationSeries ? (
+        <TournamentSeriesResultForm
+          groupId={groupId}
+          competitionId={tournamentSetup.id}
+          competitionName={tournamentSetup.name}
+          formatId={tournamentFormat.id}
+          formatLabel={tournamentFormat.label}
+          tournamentMatchId={tournamentMatch.id}
+          bestOf={tournament.tournament.bestOf!}
+          sideAWins={tournamentMatch.sideAWins}
+          sideBWins={tournamentMatch.sideBWins}
+          sideA={sideAEntry.members.map((player) => ({
+            id: player.playerId,
+            displayName: player.displayName
+          }))}
+          sideB={sideBEntry.members.map((player) => ({
+            id: player.playerId,
+            displayName: player.displayName
+          }))}
+          rule={tournamentSetup.rule}
+          orderedValues={tournamentSetup.scoreValues}
+          cancelHref={backHref}
+        />
+      ) : (
+        <RecordResultForm
+          groupId={groupId}
+          setups={setups}
+          initialCompetitionId={
+            tournament?.tournament.competitionId ?? initialCompetitionId
+          }
+          initialFormatId={tournament?.tournament.formatId}
+          tournamentMatchId={tournamentMatch?.id}
+          fixedSideA={sideAEntry?.members.map((player) => ({
+            id: player.playerId,
+            displayName: player.displayName
+          }))}
+          fixedSideB={sideBEntry?.members.map((player) => ({
+            id: player.playerId,
+            displayName: player.displayName
+          }))}
+          cancelHref={backHref}
+        />
+      )}
     </div>
   );
 }

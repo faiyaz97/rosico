@@ -5,6 +5,10 @@ import { listTournaments } from "@/lib/server/tournaments";
 import { CompetitionTabs } from "@/components/context-tabs";
 import { getGroupAccess } from "@/lib/server/authorization";
 import {
+  parseTournamentStatus,
+  tournamentStatusOptions
+} from "@/lib/tournament-status";
+import {
   ButtonLink,
   EmptyState,
   PageHeader,
@@ -13,14 +17,23 @@ import {
 } from "@/components/ui";
 
 export default async function TournamentListPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ groupId: string; competitionId: string }>;
+  searchParams: Promise<{ status?: string | string[] }>;
 }) {
   const { groupId, competitionId } = await params;
+  const query = await searchParams;
+  const status = parseTournamentStatus(query.status);
+  const baseHref = `/app/groups/${groupId}/competitions/${competitionId}/tournaments`;
   const [setup, tournaments, access] = await Promise.all([
     getCompetitionGameSetup(groupId, competitionId),
-    listTournaments(groupId, competitionId),
+    listTournaments(
+      groupId,
+      competitionId,
+      status === "all" ? undefined : status
+    ),
     getGroupAccess(groupId)
   ]);
   return (
@@ -48,8 +61,8 @@ export default async function TournamentListPage({
       <div className="filter-bar">
         <Segmented
           label="Status"
-          options={["All", "Active", "Draft", "Completed"]}
-          active="All"
+          options={tournamentStatusOptions(baseHref)}
+          active={status.charAt(0).toUpperCase() + status.slice(1)}
         />
         <span className="active-period">{tournaments.length} tournaments</span>
       </div>
@@ -90,8 +103,14 @@ export default async function TournamentListPage({
         </div>
       ) : (
         <EmptyState
-          title="No tournaments yet"
-          description="Create a bracket or league using active players in this competition."
+          title={
+            status === "all" ? "No tournaments yet" : `No ${status} tournaments`
+          }
+          description={
+            status === "all"
+              ? "Create a bracket or league using active players in this competition."
+              : "Choose another status to see this competition's tournaments."
+          }
           action={
             access.canManage ? (
               <ButtonLink
