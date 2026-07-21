@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowLeft, ChevronRight, Inbox, RotateCcw } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Inbox,
+  RotateCcw,
+  Swords,
+  Trophy
+} from "lucide-react";
 import { formatPercentage } from "@/lib/format";
 import { ImageUploadField } from "@/components/image-upload-field";
 import { SelectControl } from "@/components/select-control";
@@ -22,7 +29,16 @@ export type MatchDisplay = {
   sideB: string;
   scoreA: string;
   scoreB: string;
-  winner: "A" | "B" | "draw";
+  winner: "A" | "B" | "draw" | "pending";
+  href?: string;
+  series?: { gamesPlayed: number; bestOf: number; legScores: string[] };
+  tournament?: {
+    name: string;
+    round: number;
+    isFinal: boolean;
+    clinchedTournament: boolean;
+    confirmed: boolean;
+  };
 };
 
 export function Avatar({
@@ -217,12 +233,21 @@ export function MatchRow({
   groupId: string;
   href?: string;
 }) {
-  const destination = href ?? `/app/groups/${groupId}/games/${game.id}`;
+  const destination =
+    href ?? game.href ?? `/app/groups/${groupId}/games/${game.id}`;
   const outcome =
     game.winner === "draw"
       ? "Draw"
-      : `${game.winner === "A" ? game.sideA : game.sideB} won`;
-  const details = [game.format, game.playedAt, game.location]
+      : game.winner === "pending"
+        ? "Series in progress"
+        : `${game.winner === "A" ? game.sideA : game.sideB} won`;
+  const details = [
+    game.series
+      ? `Best of ${game.series.bestOf} · ${game.series.gamesPlayed} ${game.series.gamesPlayed === 1 ? "game" : "games"}`
+      : game.format,
+    game.playedAt,
+    game.location
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -233,8 +258,31 @@ export function MatchRow({
       aria-label={`${game.competition}, ${game.sideA} versus ${game.sideB}, ${game.scoreA} to ${game.scoreB}, ${outcome}, ${game.playedAt}${game.location ? `, at ${game.location}` : ""}`}
     >
       <div className="match-meta">
+        {game.tournament && (
+          <span
+            className={`match-tournament-tag ${game.tournament.clinchedTournament && game.tournament.confirmed ? "champion" : ""}`}
+          >
+            {game.tournament.clinchedTournament ? (
+              <Trophy size={13} aria-hidden="true" />
+            ) : (
+              <Swords size={13} aria-hidden="true" />
+            )}
+            {game.tournament.clinchedTournament
+              ? game.tournament.confirmed
+                ? `Tournament winner · ${game.tournament.name}`
+                : `Final winner · awaiting confirmation · ${game.tournament.name}`
+              : `${game.tournament.name} · ${game.tournament.isFinal ? "Final" : `Round ${game.tournament.round}`}`}
+          </span>
+        )}
         <span>{game.competition}</span>
         <small>{details}</small>
+        {game.series && (
+          <small className="match-series-legs">
+            {game.series.legScores
+              .map((score, index) => `G${index + 1} ${score}`)
+              .join(" · ")}
+          </small>
+        )}
       </div>
       <div className="match-contest">
         <div
@@ -246,7 +294,9 @@ export function MatchRow({
               ? "Winner"
               : game.winner === "draw"
                 ? "Draw"
-                : ""}
+                : game.winner === "pending"
+                  ? "In progress"
+                  : ""}
           </span>
           <strong className="match-score">{game.scoreA}</strong>
         </div>
@@ -259,7 +309,9 @@ export function MatchRow({
               ? "Winner"
               : game.winner === "draw"
                 ? "Draw"
-                : ""}
+                : game.winner === "pending"
+                  ? "In progress"
+                  : ""}
           </span>
           <strong className="match-score">{game.scoreB}</strong>
         </div>
@@ -270,45 +322,6 @@ export function MatchRow({
         aria-hidden="true"
       />
     </Link>
-  );
-}
-
-export function Segmented({
-  label,
-  options,
-  active
-}: {
-  label: string;
-  options: Array<string | { label: string; href: string }>;
-  active: string;
-}) {
-  return (
-    <div className="segment-wrap">
-      <span className="sr-only">{label}</span>
-      <div className="segmented" role="group" aria-label={label}>
-        {options.map((option) =>
-          typeof option === "string" ? (
-            <button
-              key={option}
-              type="button"
-              className={option === active ? "active" : ""}
-              aria-pressed={option === active}
-            >
-              {option}
-            </button>
-          ) : (
-            <Link
-              key={option.href}
-              href={option.href}
-              className={option.label === active ? "active" : ""}
-              aria-current={option.label === active ? "page" : undefined}
-            >
-              {option.label}
-            </Link>
-          )
-        )}
-      </div>
-    </div>
   );
 }
 

@@ -2,14 +2,9 @@ import Link from "next/link";
 import { getCompetitionGameSetup } from "@/lib/server/games";
 import { getCompetitionRanking } from "@/lib/server/rankings";
 import { CompetitionTabs } from "@/components/context-tabs";
+import { FilterSelect } from "@/components/filter-select";
 import { formatPercentage } from "@/lib/format";
-import {
-  Avatar,
-  EmptyState,
-  PageHeader,
-  Segmented,
-  Status
-} from "@/components/ui";
+import { Avatar, EmptyState, PageHeader, Status } from "@/components/ui";
 
 export default async function RankingPage({
   params,
@@ -64,7 +59,7 @@ export default async function RankingPage({
         active="Ranking"
       />
       <div className="filter-bar">
-        <Segmented
+        <FilterSelect
           label="Game format"
           options={[
             {
@@ -78,7 +73,7 @@ export default async function RankingPage({
           ]}
           active={activeFormat}
         />
-        <Segmented
+        <FilterSelect
           label="Period"
           options={Object.entries(periodLabels).map(([value, label]) => ({
             label,

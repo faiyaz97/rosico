@@ -18,6 +18,7 @@ type Match = {
     scoreB: string;
     outcome: "A" | "B" | "DRAW";
     href?: string;
+    editHref?: string;
   }>;
 };
 type Standing = {
@@ -89,7 +90,11 @@ export function EliminationView({
               const legs = match.legs ?? [];
               const legCount = Math.max(legs.length, bestOf);
               return (
-                <article className="bracket-match" key={match.id}>
+                <article
+                  className="bracket-match"
+                  id={`match-${match.id}`}
+                  key={match.id}
+                >
                   <div className="bracket-score-wrap">
                     <table className="bracket-score">
                       <caption className="sr-only">
@@ -177,13 +182,31 @@ export function EliminationView({
                         <Status>in progress</Status>
                       )
                     ) : (
-                      <Status
-                        tone={
-                          match.status === "COMPLETED" ? "success" : "neutral"
-                        }
-                      >
-                        {match.status.toLowerCase()}
-                      </Status>
+                      <>
+                        <Status
+                          tone={
+                            match.status === "COMPLETED" ? "success" : "neutral"
+                          }
+                        >
+                          {match.status.toLowerCase()}
+                        </Status>
+                        {canManage && legs.some((leg) => leg.editHref) && (
+                          <span className="bracket-edit-links">
+                            <span>Edit:</span>
+                            {legs.map((leg, legIndex) =>
+                              leg.editHref ? (
+                                <Link
+                                  className="text-link"
+                                  href={leg.editHref}
+                                  key={leg.id}
+                                >
+                                  Game {legIndex + 1}
+                                </Link>
+                              ) : null
+                            )}
+                          </span>
+                        )}
+                      </>
                     )}
                   </footer>
                 </article>
@@ -254,7 +277,11 @@ export function LeagueView({
       </div>
       <div className="match-list" style={{ marginTop: 24 }}>
         {matches.map((match) => (
-          <article className="entity-row" key={match.id}>
+          <article
+            className="entity-row"
+            id={`match-${match.id}`}
+            key={match.id}
+          >
             <span className="competition-icon">{match.round}</span>
             <span className="entity-row-main">
               <b>
@@ -271,8 +298,15 @@ export function LeagueView({
                 Record result
               </Link>
             ) : match.status === "COMPLETED" && match.legs?.[0]?.href ? (
-              <Link className="text-link" href={match.legs[0].href}>
-                View result
+              <Link
+                className="text-link"
+                href={
+                  canManage && match.legs[0].editHref
+                    ? match.legs[0].editHref
+                    : match.legs[0].href
+                }
+              >
+                {canManage ? "Edit result" : "View result"}
               </Link>
             ) : (
               <Status

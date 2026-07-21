@@ -19,7 +19,8 @@ import {
 import {
   calculateLeagueStandings,
   generateRoundRobinFixtures,
-  generateSingleEliminationBracket
+  generateSingleEliminationBracket,
+  tournamentCompletionDate
 } from "@/lib/domain";
 import {
   requireGroupAdmin,
@@ -418,6 +419,148 @@ export async function getTournament(
   };
 }
 
+export async function confirmTournamentResult(
+  groupId: string,
+  tournamentId: string
+) {
+  await requireGroupAdmin(groupId);
+  const db = getDb();
+
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select id from tournaments where id = ${tournamentId} and group_id = ${groupId} for update`
+    );
+    const [tournament] = await tx
+      .select()
+      .from(tournaments)
+      .where(
+        and(eq(tournaments.id, tournamentId), eq(tournaments.groupId, groupId))
+      )
+      .limit(1);
+    if (!tournament) throw unavailable();
+    if (tournament.status === "COMPLETED") return tournament;
+    if (tournament.status !== "ACTIVE") {
+      throw conflict("Only an active tournament result can be confirmed.");
+    }
+
+    const matchRows = await tx
+      .select()
+      .from(tournamentMatches)
+      .where(
+        and(
+          eq(tournamentMatches.tournamentId, tournamentId),
+          eq(tournamentMatches.groupId, groupId)
+        )
+      )
+      .orderBy(tournamentMatches.round, tournamentMatches.slot);
+    if (
+      !matchRows.length ||
+      matchRows.some((match) => match.status !== "COMPLETED")
+    ) {
+      throw conflict(
+        "Complete every tournament match before confirming the final result."
+      );
+    }
+
+    let winnerEntryId: string | null = null;
+    if (tournament.type === "ELIMINATION") {
+      const finalMatch = matchRows.find((match) => match.nextMatchId === null);
+      winnerEntryId = finalMatch?.winnerEntryId ?? null;
+    } else {
+      const [[rule], entryRows, gameRows] = await Promise.all([
+        tx
+          .select({ scoreType: competitionRuleVersions.scoreType })
+          .from(competitionRuleVersions)
+          .where(
+            and(
+              eq(competitionRuleVersions.id, tournament.ruleVersionId),
+              eq(competitionRuleVersions.groupId, groupId)
+            )
+          )
+          .limit(1),
+        tx
+          .select()
+          .from(tournamentEntries)
+          .where(
+            and(
+              eq(tournamentEntries.tournamentId, tournamentId),
+              eq(tournamentEntries.groupId, groupId)
+            )
+          ),
+        tx
+          .select()
+          .from(games)
+          .where(
+            and(
+              eq(games.groupId, groupId),
+              inArray(
+                games.tournamentMatchId,
+                matchRows.map((match) => match.id)
+              ),
+              isNull(games.deletedAt)
+            )
+          )
+      ]);
+      if (!rule) throw unavailable();
+      const matchById = new Map(matchRows.map((match) => [match.id, match]));
+      const standings = calculateLeagueStandings(
+        entryRows.map((entry) => ({ id: entry.id, seed: entry.seed })),
+        gameRows.flatMap((game) => {
+          const match = game.tournamentMatchId
+            ? matchById.get(game.tournamentMatchId)
+            : null;
+          if (!match?.sideAEntryId || !match.sideBEntryId) return [];
+          return [
+            {
+              round: match.round,
+              slot: match.slot,
+              sideAEntryId: match.sideAEntryId,
+              sideBEntryId: match.sideBEntryId,
+              outcome: game.outcome,
+              scoreA: Number(game.comparableScoreA),
+              scoreB: Number(game.comparableScoreB),
+              scoreDifferenceEligible: rule.scoreType !== "RESULT"
+            }
+          ];
+        }),
+        {
+          win: tournament.winPoints ?? 3,
+          draw: tournament.drawPoints ?? 1,
+          loss: tournament.lossPoints ?? 0
+        }
+      );
+      winnerEntryId = standings[0]?.entryId ?? null;
+    }
+
+    if (!winnerEntryId || tournament.winnerEntryId !== winnerEntryId) {
+      throw conflict(
+        "The calculated winner has changed. Reload the tournament before confirming it."
+      );
+    }
+
+    const [confirmed] = await tx
+      .update(tournaments)
+      .set({
+        status: "COMPLETED",
+        endsAt:
+          tournament.endsAt ?? tournamentCompletionDate(tournament.startsAt),
+        updatedAt: new Date()
+      })
+      .where(
+        and(
+          eq(tournaments.id, tournamentId),
+          eq(tournaments.groupId, groupId),
+          eq(tournaments.status, "ACTIVE")
+        )
+      )
+      .returning();
+    if (!confirmed) {
+      throw conflict("This tournament result could not be confirmed.");
+    }
+    return confirmed;
+  });
+}
+
 export async function cancelTournament(groupId: string, tournamentId: string) {
   await requireGroupAdmin(groupId);
   const db = getDb();
@@ -428,7 +571,8 @@ export async function cancelTournament(groupId: string, tournamentId: string) {
       and(
         eq(tournaments.id, tournamentId),
         eq(tournaments.groupId, groupId),
-        inArray(tournaments.status, ["DRAFT", "ACTIVE"])
+        inArray(tournaments.status, ["DRAFT", "ACTIVE"]),
+        isNull(tournaments.winnerEntryId)
       )
     )
     .returning();

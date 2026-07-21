@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { FilterSelect } from "@/components/filter-select";
 import { listCompetitions } from "@/lib/server/competitions";
 import { listTournaments } from "@/lib/server/tournaments";
-import { EmptyState, PageHeader, Segmented, Status } from "@/components/ui";
+import { EmptyState, PageHeader, Status } from "@/components/ui";
 import {
   parseTournamentStatus,
   tournamentStatusOptions
@@ -34,7 +35,7 @@ export default async function GroupTournamentsPage({
         description="Every bracket and league across this group."
       />
       <div className="filter-bar">
-        <Segmented
+        <FilterSelect
           label="Status"
           options={tournamentStatusOptions(baseHref)}
           active={status.charAt(0).toUpperCase() + status.slice(1)}
@@ -52,13 +53,17 @@ export default async function GroupTournamentsPage({
               <Status
                 tone={
                   item.status === "ACTIVE"
-                    ? "success"
+                    ? item.winnerEntryId
+                      ? "warning"
+                      : "success"
                     : item.status === "DRAFT"
                       ? "warning"
                       : "neutral"
                 }
               >
-                {item.status.toLowerCase()}
+                {item.status === "ACTIVE" && item.winnerEntryId
+                  ? "awaiting confirmation"
+                  : item.status.toLowerCase()}
               </Status>
               <h2 style={{ margin: "15px 0 4px" }}>{item.name}</h2>
               <p>

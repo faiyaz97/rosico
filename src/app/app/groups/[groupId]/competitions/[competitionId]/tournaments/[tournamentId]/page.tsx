@@ -13,6 +13,7 @@ import {
 } from "@/components/ui";
 import { getGroupAccess } from "@/lib/server/authorization";
 import { AppError } from "@/lib/server/errors";
+import { confirmTournamentResultAction } from "@/app/actions/entities";
 
 async function getTournamentOrNotFound(
   groupId: string,
@@ -28,15 +29,18 @@ async function getTournamentOrNotFound(
 }
 
 export default async function TournamentPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{
     groupId: string;
     competitionId: string;
     tournamentId: string;
   }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { groupId, competitionId, tournamentId } = await params;
+  const query = await searchParams;
   const [data, access, competitionGames] = await Promise.all([
     getTournamentOrNotFound(groupId, tournamentId, competitionId),
     getGroupAccess(groupId),
@@ -60,7 +64,8 @@ export default async function TournamentPage({
         scoreA: game.scoreA,
         scoreB: game.scoreB,
         outcome: game.outcome,
-        href: `/app/groups/${groupId}/games/${game.id}`
+        href: `/app/groups/${groupId}/games/${game.id}`,
+        editHref: `/app/groups/${groupId}/games/${game.id}/edit`
       }))
   }));
   const resultBase = `/app/groups/${groupId}/games/new?competition=${data.tournament.competitionId}&tournament=${tournamentId}`;
@@ -85,13 +90,17 @@ export default async function TournamentPage({
           <Status
             tone={
               tournament.status === "ACTIVE"
-                ? "success"
+                ? champion
+                  ? "warning"
+                  : "success"
                 : tournament.status === "DRAFT"
                   ? "warning"
                   : "neutral"
             }
           >
-            {tournament.status.toLowerCase()}
+            {tournament.status === "ACTIVE" && champion
+              ? "awaiting confirmation"
+              : tournament.status.toLowerCase()}
           </Status>
           <h1>{tournament.name}</h1>
           <p>
@@ -120,16 +129,25 @@ export default async function TournamentPage({
           </div>
         </div>
       </div>
-      {tournament.status === "COMPLETED" && champion && (
+      {query.error && (
+        <div className="form-feedback error" role="alert">
+          {query.error}
+        </div>
+      )}
+      {champion && (
         <section
-          className="tournament-champion"
+          className={`tournament-champion ${tournament.status === "ACTIVE" ? "provisional" : ""}`}
           aria-labelledby="champion-name"
         >
           <span className="tournament-champion-mark" aria-hidden="true">
             <Trophy size={24} />
           </span>
           <div>
-            <p>Tournament champion</p>
+            <p>
+              {tournament.status === "COMPLETED"
+                ? "Tournament champion"
+                : "Calculated winner"}
+            </p>
             <h2 id="champion-name">{champion.name}</h2>
             {champion.members.length > 0 && (
               <span>
@@ -139,6 +157,25 @@ export default async function TournamentPage({
               </span>
             )}
           </div>
+        </section>
+      )}
+      {tournament.status === "ACTIVE" && champion && access.canManage && (
+        <section className="surface surface-pad tournament-confirmation">
+          <div>
+            <h2>Confirm the tournament result</h2>
+            <p>
+              Check every recorded game first. Confirmation locks this
+              tournament and its results, and then enables the share graphic.
+            </p>
+          </div>
+          <form action={confirmTournamentResultAction}>
+            <input type="hidden" name="groupId" value={groupId} />
+            <input type="hidden" name="competitionId" value={competitionId} />
+            <input type="hidden" name="tournamentId" value={tournamentId} />
+            <button className="button button-primary" type="submit">
+              Confirm and lock result
+            </button>
+          </form>
         </section>
       )}
       <PageHeader
@@ -197,7 +234,7 @@ export default async function TournamentPage({
           matches={matchesWithLegs}
           resultBase={resultBase}
           bestOf={tournament.bestOf ?? 1}
-          canManage={access.canManage}
+          canManage={access.canManage && tournament.status === "ACTIVE"}
         />
       ) : standings ? (
         <LeagueView
@@ -205,7 +242,7 @@ export default async function TournamentPage({
           standings={standings}
           matches={matchesWithLegs}
           resultBase={resultBase}
-          canManage={access.canManage}
+          canManage={access.canManage && tournament.status === "ACTIVE"}
         />
       ) : (
         <EmptyState

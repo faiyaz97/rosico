@@ -3,6 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { Archive, Search, SearchX } from "lucide-react";
+import { SelectControl } from "@/components/select-control";
 import { Avatar, Status } from "@/components/ui";
 
 type PlayerListItem = {
@@ -60,18 +61,15 @@ export function PlayerList({
           />
         </label>
         <div className="filter-bar player-status-filter">
-          <div className="segmented" role="group" aria-label="Player status">
-            {(["Active", "Archived", "All"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={option === status ? "active" : ""}
-                aria-pressed={option === status}
-                onClick={() => setStatus(option)}
-              >
-                {option}
-              </button>
-            ))}
+          <div className="filter-select">
+            <SelectControl
+              ariaLabel="Player status"
+              value={status}
+              onValueChange={(value) => setStatus(value as PlayerStatus)}
+              options={(["Active", "Archived", "All"] as const).map(
+                (option) => ({ label: option, value: option })
+              )}
+            />
           </div>
           <span className="active-period" role="status" aria-live="polite">
             {visiblePlayers.length}{" "}

@@ -28,6 +28,7 @@ import {
 } from "@/lib/media/images";
 import { savePlayer, setPlayerArchived } from "@/lib/server/players";
 import {
+  confirmTournamentResult,
   createTournamentDraft,
   startTournament
 } from "@/lib/server/tournaments";
@@ -397,6 +398,21 @@ export async function startTournamentAction(formData: FormData) {
   const destination = `/app/groups/${groupId}/competitions/${competitionId}/tournaments/${tournamentId}`;
   try {
     await startTournament(groupId, tournamentId);
+  } catch (error) {
+    redirect(`${destination}?error=${encodeURIComponent(publicError(error))}`);
+  }
+  redirect(destination);
+}
+
+export async function confirmTournamentResultAction(formData: FormData) {
+  const groupId = text(formData, "groupId");
+  const competitionId = text(formData, "competitionId");
+  const tournamentId = text(formData, "tournamentId");
+  const destination = `/app/groups/${groupId}/competitions/${competitionId}/tournaments/${tournamentId}`;
+  try {
+    await confirmTournamentResult(groupId, tournamentId);
+    revalidatePath(`/app/groups/${groupId}`);
+    revalidatePath(destination);
   } catch (error) {
     redirect(`${destination}?error=${encodeURIComponent(publicError(error))}`);
   }

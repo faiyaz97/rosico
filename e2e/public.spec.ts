@@ -98,6 +98,35 @@ test("public groups use the canonical read-only application layout", async ({
   await expect(page.getByRole("menu")).toBeHidden();
 });
 
+test("Games navigation and overview match history open the history page", async ({
+  page
+}) => {
+  const groupId = "10000000-0000-4000-8000-000000000001";
+  const overview = `/app/groups/${groupId}`;
+  const history = `${overview}/games`;
+
+  await page.goto(overview);
+  const visiblePrimaryNavigation = page.locator(
+    'nav[aria-label="Primary navigation"]:visible'
+  );
+  await Promise.all([
+    page.waitForURL(new RegExp(`${history}$`)),
+    visiblePrimaryNavigation.getByRole("link", { name: "Games" }).click()
+  ]);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Match history" })
+  ).toBeVisible();
+
+  await page.goto(overview);
+  await Promise.all([
+    page.waitForURL(new RegExp(`${history}$`)),
+    page.getByRole("link", { name: "Match history" }).click()
+  ]);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Match history" })
+  ).toBeVisible();
+});
+
 test("legacy public links redirect and private groups stay unavailable", async ({
   page
 }) => {
@@ -263,18 +292,21 @@ test("tournament filters and participant picker respond to user input", async ({
   await logInAsDemoAdmin(page);
 
   await page.goto(base);
+  const statusFilter = page.getByRole("combobox", { name: "Status" });
+  await statusFilter.click();
   await Promise.all([
     page.waitForURL(new RegExp(`${base}\\?status=draft$`)),
-    page.getByRole("link", { name: "Draft", exact: true }).click()
+    page.getByRole("option", { name: "Draft", exact: true }).click()
   ]);
   await expect(
     page.getByRole("heading", { name: "No draft tournaments" })
   ).toBeVisible();
   await expect(page.getByText("0 tournaments")).toBeVisible();
 
+  await page.getByRole("combobox", { name: "Status" }).click();
   await Promise.all([
     page.waitForURL(new RegExp(`${base}\\?status=active$`)),
-    page.getByRole("link", { name: "Active", exact: true }).click()
+    page.getByRole("option", { name: "Active", exact: true }).click()
   ]);
   await expect(
     page.getByRole("heading", { name: "Summer knockout" })

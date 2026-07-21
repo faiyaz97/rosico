@@ -1,18 +1,29 @@
-import { getCompetitionGameSetup, listGames } from "@/lib/server/games";
+import { getCompetitionGameSetup, listMatchHistory } from "@/lib/server/games";
 import { CompetitionTabs } from "@/components/context-tabs";
+import { FilterSelect } from "@/components/filter-select";
 import { gameForDisplay } from "@/components/presentation";
-import { EmptyState, MatchRow, PageHeader, Segmented } from "@/components/ui";
+import { EmptyState, MatchRow, PageHeader } from "@/components/ui";
 
 export default async function CompetitionGamesPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ groupId: string; competitionId: string }>;
+  searchParams: Promise<{ format?: string }>;
 }) {
   const { groupId, competitionId } = await params;
+  const query = await searchParams;
   const [setup, games] = await Promise.all([
     getCompetitionGameSetup(groupId, competitionId),
-    listGames(groupId, competitionId)
+    listMatchHistory(groupId, competitionId)
   ]);
+  const selectedFormat = setup.formats.find(
+    (format) => format.id === query.format
+  );
+  const visibleGames = selectedFormat
+    ? games.filter((game) => game.formatId === selectedFormat.id)
+    : games;
+  const baseHref = `/app/groups/${groupId}/competitions/${competitionId}/games`;
   return (
     <div className="app-content">
       <PageHeader
@@ -27,19 +38,24 @@ export default async function CompetitionGamesPage({
         active="Games"
       />
       <div className="filter-bar">
-        <Segmented
-          label="Format"
+        <FilterSelect
+          label="Game format"
+          active={selectedFormat?.label ?? "All formats"}
           options={[
-            "All formats",
-            ...setup.formats.map((format) => format.label)
+            { label: "All formats", href: baseHref },
+            ...setup.formats.map((format) => ({
+              label: format.label,
+              href: `${baseHref}?format=${format.id}`
+            }))
           ]}
-          active="All formats"
         />
-        <span className="active-period">{games.length} recorded games</span>
+        <span className="active-period">
+          {visibleGames.length} recorded matches
+        </span>
       </div>
-      {games.length ? (
+      {visibleGames.length ? (
         <div className="match-list">
-          {games.map((game) => (
+          {visibleGames.map((game) => (
             <MatchRow
               groupId={groupId}
               key={game.id}

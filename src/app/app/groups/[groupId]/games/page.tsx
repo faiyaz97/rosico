@@ -1,7 +1,8 @@
 import { listCompetitions } from "@/lib/server/competitions";
-import { listGames } from "@/lib/server/games";
+import { listMatchHistory } from "@/lib/server/games";
 import { gameForDisplay } from "@/components/presentation";
-import { EmptyState, MatchRow, PageHeader, Segmented } from "@/components/ui";
+import { FilterSelect } from "@/components/filter-select";
+import { EmptyState, MatchRow, PageHeader } from "@/components/ui";
 
 export default async function GamesPage({
   params,
@@ -16,7 +17,7 @@ export default async function GamesPage({
   const selectedCompetition = competitions.find(
     (competition) => competition.id === query.competition
   );
-  const games = await listGames(groupId, selectedCompetition?.id);
+  const games = await listMatchHistory(groupId, selectedCompetition?.id);
   const names = new Map(
     competitions.map((competition) => [competition.id, competition.name])
   );
@@ -24,10 +25,10 @@ export default async function GamesPage({
     <div className="app-content">
       <PageHeader
         title="Match history"
-        description="Every recorded result across this group, newest first."
+        description="Every recorded match across this group, newest first."
       />
       <div className="filter-bar">
-        <Segmented
+        <FilterSelect
           label="Competition"
           options={[
             {
@@ -41,7 +42,7 @@ export default async function GamesPage({
           ]}
           active={selectedCompetition?.name ?? "All competitions"}
         />
-        <span className="active-period">{games.length} recorded games</span>
+        <span className="active-period">{games.length} recorded matches</span>
       </div>
       {games.length ? (
         <div className="match-list">

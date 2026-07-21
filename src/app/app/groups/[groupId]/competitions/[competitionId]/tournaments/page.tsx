@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
+import { FilterSelect } from "@/components/filter-select";
 import { getCompetitionGameSetup } from "@/lib/server/games";
 import { listTournaments } from "@/lib/server/tournaments";
 import { CompetitionTabs } from "@/components/context-tabs";
@@ -8,13 +9,7 @@ import {
   parseTournamentStatus,
   tournamentStatusOptions
 } from "@/lib/tournament-status";
-import {
-  ButtonLink,
-  EmptyState,
-  PageHeader,
-  Segmented,
-  Status
-} from "@/components/ui";
+import { ButtonLink, EmptyState, PageHeader, Status } from "@/components/ui";
 
 export default async function TournamentListPage({
   params,
@@ -59,7 +54,7 @@ export default async function TournamentListPage({
         active="Tournaments"
       />
       <div className="filter-bar">
-        <Segmented
+        <FilterSelect
           label="Status"
           options={tournamentStatusOptions(baseHref)}
           active={status.charAt(0).toUpperCase() + status.slice(1)}
@@ -77,13 +72,17 @@ export default async function TournamentListPage({
               <Status
                 tone={
                   item.status === "ACTIVE"
-                    ? "success"
+                    ? item.winnerEntryId
+                      ? "warning"
+                      : "success"
                     : item.status === "DRAFT"
                       ? "warning"
                       : "neutral"
                 }
               >
-                {item.status.toLowerCase()}
+                {item.status === "ACTIVE" && item.winnerEntryId
+                  ? "awaiting confirmation"
+                  : item.status.toLowerCase()}
               </Status>
               <h2 style={{ margin: "15px 0 4px" }}>{item.name}</h2>
               <p>

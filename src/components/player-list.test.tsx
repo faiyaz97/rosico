@@ -45,7 +45,8 @@ describe("PlayerList", () => {
   it("shows a recoverable no-results state and clears all filters", () => {
     render(<PlayerList groupId="group-1" players={players} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Active" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Player status" }));
+    fireEvent.click(screen.getByRole("option", { name: "Active" }));
     fireEvent.change(
       screen.getByRole("searchbox", { name: "Search players" }),
       {
@@ -59,10 +60,9 @@ describe("PlayerList", () => {
     expect(
       screen.getByRole("searchbox", { name: "Search players" })
     ).toHaveValue("");
-    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
+    expect(
+      screen.getByRole("combobox", { name: "Player status" })
+    ).toHaveTextContent("All");
     expect(screen.getAllByRole("link")).toHaveLength(2);
   });
 });

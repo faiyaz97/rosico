@@ -38,6 +38,7 @@ import {
   tournamentCompletionDate,
   validateGameTeams
 } from "@/lib/domain";
+import { aggregateMatchHistory } from "@/lib/match-history";
 import {
   requireGroupAdmin,
   requireGroupViewer
@@ -431,7 +432,6 @@ export async function recordGame(input: unknown) {
           await tx
             .update(tournaments)
             .set({
-              status: "COMPLETED",
               winnerEntryId: series.winnerEntryId,
               endsAt: tournamentCompletionDate(tournament.startsAt),
               updatedAt: new Date()
@@ -548,7 +548,6 @@ export async function recordGame(input: unknown) {
           await tx
             .update(tournaments)
             .set({
-              status: "COMPLETED",
               winnerEntryId,
               endsAt: tournamentCompletionDate(tournament.startsAt),
               updatedAt: new Date()
@@ -881,7 +880,6 @@ export async function recordTournamentSeries(input: unknown) {
       await tx
         .update(tournaments)
         .set({
-          status: "COMPLETED",
           winnerEntryId: series.winnerEntryId,
           endsAt: tournamentCompletionDate(context.tournament.startsAt),
           updatedAt: new Date()
@@ -1057,6 +1055,64 @@ export async function listGames(groupId: string, competitionId?: string) {
   }));
 }
 
+export async function listMatchHistory(
+  groupId: string,
+  competitionId?: string
+) {
+  const gameRows = await listGames(groupId, competitionId);
+  const tournamentMatchIds = [
+    ...new Set(
+      gameRows.flatMap((game) =>
+        game.tournamentMatchId ? [game.tournamentMatchId] : []
+      )
+    )
+  ];
+  if (!tournamentMatchIds.length) {
+    return aggregateMatchHistory(gameRows, [], () => "");
+  }
+
+  const db = getDb();
+  const contexts = await db
+    .select({
+      matchId: tournamentMatches.id,
+      tournamentId: tournaments.id,
+      competitionId: tournaments.competitionId,
+      tournamentName: tournaments.name,
+      tournamentType: tournaments.type,
+      tournamentStatus: tournaments.status,
+      bestOf: tournaments.bestOf,
+      round: tournamentMatches.round,
+      slot: tournamentMatches.slot,
+      sideAWins: tournamentMatches.sideAWins,
+      sideBWins: tournamentMatches.sideBWins,
+      winnerEntryId: tournamentMatches.winnerEntryId,
+      sideAEntryId: tournamentMatches.sideAEntryId,
+      sideBEntryId: tournamentMatches.sideBEntryId,
+      nextMatchId: tournamentMatches.nextMatchId
+    })
+    .from(tournamentMatches)
+    .innerJoin(
+      tournaments,
+      and(
+        eq(tournaments.id, tournamentMatches.tournamentId),
+        eq(tournaments.groupId, tournamentMatches.groupId)
+      )
+    )
+    .where(
+      and(
+        eq(tournamentMatches.groupId, groupId),
+        inArray(tournamentMatches.id, tournamentMatchIds)
+      )
+    );
+
+  return aggregateMatchHistory(
+    gameRows,
+    contexts,
+    (context) =>
+      `/app/groups/${groupId}/competitions/${context.competitionId}/tournaments/${context.tournamentId}#match-${context.matchId}`
+  );
+}
+
 export async function getGame(groupId: string, gameId: string) {
   await requireGroupViewer(groupId);
   const db = getDb();
@@ -1110,8 +1166,13 @@ export async function getGame(groupId: string, gameId: string) {
           .select({
             tournamentId: tournamentMatches.tournamentId,
             competitionId: tournaments.competitionId,
+            name: tournaments.name,
             type: tournaments.type,
-            bestOf: tournaments.bestOf
+            bestOf: tournaments.bestOf,
+            status: tournaments.status,
+            round: tournamentMatches.round,
+            slot: tournamentMatches.slot,
+            nextMatchId: tournamentMatches.nextMatchId
           })
           .from(tournamentMatches)
           .innerJoin(
@@ -1321,7 +1382,42 @@ export async function updateGame(input: unknown) {
       await tx.execute(
         sql`select id from tournament_matches where id = ${context.match.id} and group_id = ${data.groupId} for update`
       );
-      tournamentContext = context;
+      const [lockedTournament] = await tx
+        .select()
+        .from(tournaments)
+        .where(
+          and(
+            eq(tournaments.id, context.tournament.id),
+            eq(tournaments.groupId, data.groupId)
+          )
+        )
+        .limit(1);
+      const [lockedMatch] = await tx
+        .select()
+        .from(tournamentMatches)
+        .where(
+          and(
+            eq(tournamentMatches.id, context.match.id),
+            eq(tournamentMatches.groupId, data.groupId)
+          )
+        )
+        .limit(1);
+      if (
+        !lockedTournament ||
+        !lockedMatch?.sideAEntryId ||
+        !lockedMatch.sideBEntryId
+      ) {
+        throw unavailable();
+      }
+      if (lockedTournament.status !== "ACTIVE") {
+        throw conflict(
+          "This tournament result has been confirmed and can no longer be edited."
+        );
+      }
+      tournamentContext = {
+        tournament: lockedTournament,
+        match: lockedMatch
+      };
 
       const members = await tx
         .select({
@@ -1332,19 +1428,19 @@ export async function updateGame(input: unknown) {
         .where(
           and(
             eq(tournamentEntryPlayers.groupId, data.groupId),
-            eq(tournamentEntryPlayers.tournamentId, context.tournament.id),
+            eq(tournamentEntryPlayers.tournamentId, lockedTournament.id),
             inArray(tournamentEntryPlayers.entryId, [
-              context.match.sideAEntryId,
-              context.match.sideBEntryId
+              lockedMatch.sideAEntryId,
+              lockedMatch.sideBEntryId
             ])
           )
         );
       const expectedA = members
-        .filter((member) => member.entryId === context.match.sideAEntryId)
+        .filter((member) => member.entryId === lockedMatch.sideAEntryId)
         .map((member) => member.playerId)
         .sort();
       const expectedB = members
-        .filter((member) => member.entryId === context.match.sideBEntryId)
+        .filter((member) => member.entryId === lockedMatch.sideBEntryId)
         .map((member) => member.playerId)
         .sort();
       if (
@@ -1525,7 +1621,6 @@ export async function updateGame(input: unknown) {
           await tx
             .update(tournaments)
             .set({
-              status: series.completed ? "COMPLETED" : "ACTIVE",
               winnerEntryId: series.winnerEntryId,
               endsAt: series.completed
                 ? tournamentCompletionDate(tournament.startsAt)
@@ -1644,7 +1739,6 @@ export async function updateGame(input: unknown) {
           await tx
             .update(tournaments)
             .set({
-              status: "COMPLETED",
               winnerEntryId: standings[0]?.entryId ?? null,
               endsAt: tournamentCompletionDate(tournament.startsAt),
               updatedAt

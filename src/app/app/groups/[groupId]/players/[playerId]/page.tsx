@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Archive, Pencil } from "lucide-react";
 import { revalidatePath } from "next/cache";
 import { listCompetitions, listGroupFormats } from "@/lib/server/competitions";
-import { listGames } from "@/lib/server/games";
+import { listGames, listMatchHistory } from "@/lib/server/games";
 import { listPlayers, setPlayerArchived } from "@/lib/server/players";
 import { getCompetitionRanking } from "@/lib/server/rankings";
 import {
@@ -11,6 +11,7 @@ import {
   type RankingPeriod
 } from "@/lib/domain";
 import { gameForDisplay } from "@/components/presentation";
+import { FilterSelect } from "@/components/filter-select";
 import { formatPercentage } from "@/lib/format";
 import {
   Avatar,
@@ -19,13 +20,11 @@ import {
   MatchRow,
   PageHeader,
   Section,
-  Segmented,
   Stat,
   Status
 } from "@/components/ui";
 import { notFound } from "next/navigation";
 import { getGroupAccess } from "@/lib/server/authorization";
-import { SelectControl } from "@/components/select-control";
 
 export default async function PlayerDetailPage({
   params,
@@ -36,13 +35,15 @@ export default async function PlayerDetailPage({
 }) {
   const { groupId, playerId } = await params;
   const filters = await searchParams;
-  const [players, games, competitions, formats, access] = await Promise.all([
-    listPlayers(groupId),
-    listGames(groupId),
-    listCompetitions(groupId),
-    listGroupFormats(groupId),
-    getGroupAccess(groupId)
-  ]);
+  const [players, games, matchHistory, competitions, formats, access] =
+    await Promise.all([
+      listPlayers(groupId),
+      listGames(groupId),
+      listMatchHistory(groupId),
+      listCompetitions(groupId),
+      listGroupFormats(groupId),
+      getGroupAccess(groupId)
+    ]);
   const player = players.find((item) => item.id === playerId);
   if (!player) notFound();
   const isArchived = Boolean(player.archivedAt);
@@ -61,6 +62,14 @@ export default async function PlayerDetailPage({
   const periodRange =
     period === "all" ? null : getPeriodRange(period, new Date());
   const playerGames = games.filter(
+    (game) =>
+      (formatId === "all" || game.formatId === formatId) &&
+      (!periodRange || isWithinPeriod(game.playedAt, periodRange)) &&
+      [...game.sideA, ...game.sideB].some(
+        (participant) => participant.playerId === playerId
+      )
+  );
+  const recentMatches = matchHistory.filter(
     (game) =>
       (formatId === "all" || game.formatId === formatId) &&
       (!periodRange || isWithinPeriod(game.playedAt, periodRange)) &&
@@ -174,7 +183,7 @@ export default async function PlayerDetailPage({
         </div>
       </div>
       <div className="filter-bar">
-        <Segmented
+        <FilterSelect
           label="Statistics period"
           options={(
             Object.entries(periodLabels) as Array<[RankingPeriod, string]>
@@ -184,31 +193,24 @@ export default async function PlayerDetailPage({
           }))}
           active={periodLabels[period]}
         />
-        <form method="get" className="field-row two">
-          {period !== "all" && (
-            <input type="hidden" name="period" value={period} />
-          )}
-          <label className="field">
-            <span>Game format</span>
-            <SelectControl
-              name="format"
-              ariaLabel="Game format"
-              defaultValue={formatId}
-              options={[
-                { label: "All formats", value: "all" },
-                ...formats.map((format) => ({
-                  label: `${format.competitionName} - ${format.label}`,
-                  value: format.id
-                }))
-              ]}
-            />
-          </label>
-          <div style={{ display: "flex", alignItems: "end" }}>
-            <button className="button button-secondary" type="submit">
-              Apply format
-            </button>
-          </div>
-        </form>
+        <FilterSelect
+          label="Game format"
+          active={
+            selectedFormat
+              ? `${selectedFormat.competitionName} - ${selectedFormat.label}`
+              : "All formats"
+          }
+          options={[
+            {
+              label: "All formats",
+              href: playerHref(period, "all")
+            },
+            ...formats.map((format) => ({
+              label: `${format.competitionName} - ${format.label}`,
+              href: playerHref(period, format.id)
+            }))
+          ]}
+        />
         <span className="active-period">
           {periodRange
             ? `${periodRange.start.toLocaleDateString("en-GB", { timeZone: "Europe/Rome" })} to ${periodRange.end.toLocaleDateString("en-GB", { timeZone: "Europe/Rome" })}`
@@ -236,9 +238,9 @@ export default async function PlayerDetailPage({
       </div>
       <div className="split-grid">
         <Section title="Recent games">
-          {playerGames.length ? (
+          {recentMatches.length ? (
             <div className="match-list">
-              {playerGames.slice(0, 5).map((game) => (
+              {recentMatches.slice(0, 5).map((game) => (
                 <MatchRow
                   groupId={groupId}
                   game={gameForDisplay(game, {

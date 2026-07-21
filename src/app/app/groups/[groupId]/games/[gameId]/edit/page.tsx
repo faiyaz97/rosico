@@ -2,7 +2,7 @@ import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 
 import { RecordResultForm } from "@/components/record-result-form";
-import { PageHeader } from "@/components/ui";
+import { ButtonLink, EmptyState, PageHeader } from "@/components/ui";
 import { APPLICATION_TIME_ZONE } from "@/lib/domain";
 import { requireGroupAdmin } from "@/lib/server/authorization";
 import { getCompetitionGameSetup, getGame } from "@/lib/server/games";
@@ -15,6 +15,41 @@ export default async function EditGamePage({
   const { groupId, gameId } = await params;
   await requireGroupAdmin(groupId);
   const game = await getGame(groupId, gameId);
+  if (game.tournament && game.tournament.status !== "ACTIVE") {
+    const tournamentHref = `/app/groups/${groupId}/competitions/${game.tournament.competitionId}/tournaments/${game.tournament.tournamentId}#match-${game.tournamentMatchId}`;
+    return (
+      <div className="app-content">
+        <PageHeader
+          backHref={tournamentHref}
+          backLabel={game.tournament.name}
+          eyebrow={
+            game.tournament.status === "COMPLETED"
+              ? "Confirmed result"
+              : "Locked result"
+          }
+          title="This result is locked"
+          description={
+            game.tournament.status === "COMPLETED"
+              ? "The tournament result has been confirmed, so its games can no longer be corrected."
+              : "This tournament is no longer active, so its games cannot be corrected."
+          }
+        />
+        <EmptyState
+          title={
+            game.tournament.status === "COMPLETED"
+              ? "Tournament confirmed"
+              : "Tournament not active"
+          }
+          description="Return to the tournament to review the final bracket or table."
+          action={
+            <ButtonLink href={tournamentHref} variant="secondary">
+              View tournament
+            </ButtonLink>
+          }
+        />
+      </div>
+    );
+  }
   const setup = await getCompetitionGameSetup(groupId, game.competitionId, {
     includeArchivedFormatId: game.formatId,
     pinnedRuleVersionId: game.ruleVersionId

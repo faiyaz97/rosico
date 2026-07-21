@@ -1,6 +1,7 @@
 import { Pencil, Share2 } from "lucide-react";
+import Link from "next/link";
 
-import { ButtonLink, PageHeader, Stat } from "@/components/ui";
+import { ButtonLink, PageHeader, Stat, Status } from "@/components/ui";
 import { listCompetitions, listGroupFormats } from "@/lib/server/competitions";
 import { getGame } from "@/lib/server/games";
 import { getGroupAccess } from "@/lib/server/authorization";
@@ -27,11 +28,18 @@ export default async function GameDetailPage({
   const winner =
     game.outcome === "DRAW" ? "Draw" : game.outcome === "A" ? sideA : sideB;
 
+  const tournamentHref = game.tournament
+    ? `/app/groups/${groupId}/competitions/${game.tournament.competitionId}/tournaments/${game.tournament.tournamentId}#match-${game.tournamentMatchId}`
+    : undefined;
+  const canEdit =
+    access.canManage &&
+    (!game.tournament || game.tournament.status === "ACTIVE");
+
   return (
     <div className="app-content">
       <PageHeader
-        backHref={`/app/groups/${groupId}/games`}
-        backLabel="Match history"
+        backHref={tournamentHref ?? `/app/groups/${groupId}/games`}
+        backLabel={game.tournament?.name ?? "Match history"}
         eyebrow={competition?.name ?? "Match"}
         title={`${sideA} vs ${sideB}`}
         description={new Intl.DateTimeFormat("en-GB", {
@@ -42,12 +50,14 @@ export default async function GameDetailPage({
         action={
           access.canManage ? (
             <>
-              <ButtonLink
-                href={`/app/groups/${groupId}/games/${gameId}/edit`}
-                variant="secondary"
-              >
-                <Pencil size={16} /> Edit
-              </ButtonLink>
+              {canEdit && (
+                <ButtonLink
+                  href={`/app/groups/${groupId}/games/${gameId}/edit`}
+                  variant="secondary"
+                >
+                  <Pencil size={16} /> Edit
+                </ButtonLink>
+              )}
               <ButtonLink href={`/app/groups/${groupId}/games/${gameId}/share`}>
                 <Share2 size={16} /> Share result
               </ButtonLink>
@@ -55,6 +65,35 @@ export default async function GameDetailPage({
           ) : undefined
         }
       />
+      {game.tournament && (
+        <Link className="tournament-result-context" href={tournamentHref!}>
+          <span>
+            Tournament ·{" "}
+            {game.tournament.type === "ELIMINATION" &&
+            game.tournament.nextMatchId === null
+              ? "Final"
+              : `Round ${game.tournament.round}`}
+          </span>
+          <strong>{game.tournament.name}</strong>
+          <Status
+            tone={
+              game.tournament.status === "ACTIVE"
+                ? "success"
+                : game.tournament.status === "CANCELLED"
+                  ? "danger"
+                  : "neutral"
+            }
+          >
+            {game.tournament.status === "ACTIVE"
+              ? "Editable"
+              : game.tournament.status === "COMPLETED"
+                ? "Confirmed"
+                : game.tournament.status === "CANCELLED"
+                  ? "Cancelled · locked"
+                  : "Locked"}
+          </Status>
+        </Link>
+      )}
       <section className="result-detail surface">
         <div>
           <span>{sideA}</span>

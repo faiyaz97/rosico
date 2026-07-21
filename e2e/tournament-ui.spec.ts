@@ -45,6 +45,19 @@ test("tournament bracket keeps navigation and scores usable without overflow", a
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth)
   ).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
+  const mobileNavigation = page.locator(".mobile-bottom-nav");
+  if ((page.viewportSize()?.width ?? 0) < 1024) {
+    await expect(mobileNavigation).toBeVisible();
+    const [navigationBox, viewportWidth] = await Promise.all([
+      mobileNavigation.boundingBox(),
+      page.evaluate(() => window.innerWidth)
+    ]);
+    expect(navigationBox).not.toBeNull();
+    expect(navigationBox!.x).toBeGreaterThanOrEqual(0);
+    expect(navigationBox!.x + navigationBox!.width).toBeLessThanOrEqual(
+      viewportWidth
+    );
+  }
   expect(consoleErrors).toEqual([]);
 });
 

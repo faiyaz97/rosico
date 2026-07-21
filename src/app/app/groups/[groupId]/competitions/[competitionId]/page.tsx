@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Settings } from "lucide-react";
-import { getCompetitionGameSetup, listGames } from "@/lib/server/games";
+import { getCompetitionGameSetup, listMatchHistory } from "@/lib/server/games";
 import { getCompetitionRanking } from "@/lib/server/rankings";
 import { listTournaments } from "@/lib/server/tournaments";
 import { CompetitionTabs } from "@/components/context-tabs";
@@ -25,7 +25,7 @@ export default async function CompetitionOverviewPage({
   const { groupId, competitionId } = await params;
   const [setup, games, ranking, tournaments, access] = await Promise.all([
     getCompetitionGameSetup(groupId, competitionId),
-    listGames(groupId, competitionId),
+    listMatchHistory(groupId, competitionId),
     getCompetitionRanking({ groupId, competitionId }),
     listTournaments(groupId, competitionId),
     getGroupAccess(groupId)
@@ -64,7 +64,7 @@ export default async function CompetitionOverviewPage({
         active="Overview"
       />
       <div className="stats-grid">
-        <Stat label="Games" value={games.length} />
+        <Stat label="Matches" value={games.length} />
         <Stat label="Players" value={ranking.rows.length} />
         <Stat
           label="Formats"
@@ -143,7 +143,11 @@ export default async function CompetitionOverviewPage({
                   href={`/app/groups/${groupId}/competitions/${competitionId}/tournaments/${item.id}`}
                   key={item.id}
                 >
-                  <Status tone="success">In progress</Status>
+                  <Status tone={item.winnerEntryId ? "warning" : "success"}>
+                    {item.winnerEntryId
+                      ? "Awaiting confirmation"
+                      : "In progress"}
+                  </Status>
                   <h2 style={{ margin: "14px 0 5px" }}>{item.name}</h2>
                   <p>
                     {item.type === "ELIMINATION"

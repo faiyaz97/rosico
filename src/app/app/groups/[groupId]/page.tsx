@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Settings } from "lucide-react";
 import { listCompetitions } from "@/lib/server/competitions";
-import { listGames } from "@/lib/server/games";
+import { listMatchHistory } from "@/lib/server/games";
 import { getGroupOverview } from "@/lib/server/groups";
 import { listPlayers } from "@/lib/server/players";
 import { getGroupRanking } from "@/lib/server/rankings";
@@ -39,7 +39,7 @@ export default async function GroupOverviewPage({
     getGroupOverview(groupId),
     listPlayers(groupId),
     listCompetitions(groupId),
-    listGames(groupId),
+    listMatchHistory(groupId),
     listTournaments(groupId)
   ]);
   const selectedCompetition =
@@ -80,7 +80,7 @@ export default async function GroupOverviewPage({
           value={players.filter((player) => !player.archivedAt).length}
         />
         <Stat label="Competitions" value={competitions.length} />
-        <Stat label="Games" value={games.length} />
+        <Stat label="Matches" value={games.length} />
         <Stat label="Admins" value={adminCount} />
       </div>
       <Section
@@ -192,7 +192,11 @@ export default async function GroupOverviewPage({
                   href={`/app/groups/${groupId}/competitions/${item.competitionId}/tournaments/${item.id}`}
                   key={item.id}
                 >
-                  <Status tone="success">In progress</Status>
+                  <Status tone={item.winnerEntryId ? "warning" : "success"}>
+                    {item.winnerEntryId
+                      ? "Awaiting confirmation"
+                      : "In progress"}
+                  </Status>
                   <h2 style={{ margin: "15px 0 4px" }}>{item.name}</h2>
                   <p>
                     {item.type === "ELIMINATION"
